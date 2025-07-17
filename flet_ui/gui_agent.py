@@ -47,13 +47,19 @@ except ImportError as e:
     def system_info(info_type="all"):
         return f"Error: System info tool unavailable - {str(e)}"
 
+try:
+    from agent_tools.close_app_tool import close_app
+except ImportError as e:
+    def close_app(app_name):
+        return f"Error: Close app tool unavailable - {str(e)}"
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
         self.page = page
         self.messages = []
         self.tools = [self.launch_apps, self.take_screenshot_wrapper, 
-                     self.web_search_wrapper, self.get_system_info]
+                     self.web_search_wrapper, self.get_system_info, self.close_apps]
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -79,9 +85,10 @@ class OllamaAgentGUI:
             
             "AVAILABLE TOOLS:\n" +
             "1. launch_apps(app_name): Launch applications by name\n" +
-            "2. take_screenshot_wrapper(save_path=None, window_title=None): Capture screenshot; optionally specify path and window\n" +
-            "3. web_search_wrapper(query, max_results=5): Search the web using DuckDuckGo\n" +
-            "4. get_system_info(info_type='all'): Get system information - options: 'all', 'cpu', 'memory', 'disk', 'network', 'os', 'processes'\n\n" +
+            "2. close_apps(app_name): Close applications by partial name match\n" +
+            "3. take_screenshot_wrapper(save_path=None, window_title=None): Capture screenshot; optionally specify path and window\n" +
+            "4. web_search_wrapper(query, max_results=5): Search the web using DuckDuckGo\n" +
+            "5. get_system_info(info_type='all'): Get system information - options: 'all', 'cpu', 'memory', 'disk', 'network', 'os', 'processes'\n\n" +
             
             "CRITICAL RULES TO FOLLOW:\n" +
             "1. NEVER invent tools or parameters that weren't explicitly provided to you\n" +
@@ -499,6 +506,13 @@ class OllamaAgentGUI:
     def get_system_info(self, info_type: str = "all") -> str:
         """Get system information based on the requested type."""
         return system_info(info_type=info_type)
+        
+    def close_apps(self, app_name: str) -> str:
+        """Close applications by partial name match."""
+        if isinstance(app_name, str) and app_name.strip():
+            return close_app(app_name=app_name)
+        else:
+            return "Error: Invalid or empty application name. Please provide a valid application name."
 
 
 def main(page: ft.Page):
