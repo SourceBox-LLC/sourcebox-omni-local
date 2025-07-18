@@ -1,3 +1,14 @@
+"""
+Game Launcher Tool - Find and launch games by title
+This tool can automatically detect and launch games from multiple sources:
+- Steam
+- Epic Games
+- GOG
+- Origin/EA
+- Battle.net
+- Other common game installation locations
+"""
+
 import os
 import subprocess
 import glob
@@ -7,7 +18,7 @@ import json
 from pathlib import Path
 
 
-def find_and_launch_game(game_title: str) -> str:
+def launch_game(game_title: str) -> str:
     """
     Find and launch a game by title.
     
@@ -20,21 +31,28 @@ def find_and_launch_game(game_title: str) -> str:
     game_title = game_title.lower().strip()
     
     # Search for the game
-    game_info = find_game(game_title)
+    game_info = _find_game(game_title)
     
     if not game_info:
-        return f"No game found matching '{game_title}'. Try a different title."
+        return f"No game found matching '{game_title}'. Try a different title or check if it's installed."
     
     # Launch the game
-    executable_path, game_name = game_info
+    launch_path, game_name = game_info
     try:
-        subprocess.Popen(executable_path)
+        # Check if it's a Steam URL or regular executable
+        if launch_path.startswith("steam://"):
+            # For Steam games, use the Steam protocol
+            import webbrowser
+            webbrowser.open(launch_path)
+        else:
+            # For non-Steam games, launch the executable directly
+            subprocess.Popen(launch_path)
         return f"Successfully launched {game_name}"
     except Exception as e:
         return f"Error launching {game_name}: {str(e)}"
 
 
-def find_game(game_title: str) -> Optional[Tuple[str, str]]:
+def _find_game(game_title: str) -> Optional[Tuple[str, str]]:
     """
     Find a game by title across multiple game stores and common locations.
     
@@ -46,32 +64,32 @@ def find_game(game_title: str) -> Optional[Tuple[str, str]]:
     """
     # Try different game sources
     # 1. Steam games
-    steam_result = find_steam_game(game_title)
+    steam_result = _find_steam_game(game_title)
     if steam_result:
         return steam_result
     
     # 2. Epic Games
-    epic_result = find_epic_game(game_title)
+    epic_result = _find_epic_game(game_title)
     if epic_result:
         return epic_result
     
     # 3. GOG Games
-    gog_result = find_gog_game(game_title)
+    gog_result = _find_gog_game(game_title)
     if gog_result:
         return gog_result
     
     # 4. Origin/EA Games
-    ea_result = find_ea_game(game_title)
+    ea_result = _find_ea_game(game_title)
     if ea_result:
         return ea_result
     
     # 5. Battle.net Games
-    battlenet_result = find_battlenet_game(game_title)
+    battlenet_result = _find_battlenet_game(game_title)
     if battlenet_result:
         return battlenet_result
     
     # 6. Common game folders
-    common_result = find_game_in_common_locations(game_title)
+    common_result = _find_game_in_common_locations(game_title)
     if common_result:
         return common_result
     
@@ -79,36 +97,73 @@ def find_game(game_title: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def find_steam_game(game_title: str) -> Optional[Tuple[str, str]]:
+def _find_steam_game(game_title: str) -> Optional[Tuple[str, str]]:
     """
     Find a Steam game by title.
     """
-    steam_path = get_steam_path()
+    steam_path = _get_steam_path()
     if not steam_path:
         return None
     
     # Find Steam game libraries
-    library_folders = get_steam_libraries(steam_path)
+    library_folders = _get_steam_libraries(steam_path)
     
     # Search in all library folders
     for library in library_folders:
         steamapps_path = os.path.join(library, "steamapps")
         
-        # Check common folder for game directories
+        # First try finding by app manifest (more reliable)
+        for manifest_file in glob.glob(os.path.join(steamapps_path, "appmanifest_*.acf")):
+            try:
+                # Read manifest to find game name
+                with open(manifest_file, 'r', encoding='utf-8') as f:
+                    manifest_content = f.read()
+                    
+                # Extract app ID from filename
+                app_id = os.path.basename(manifest_file).split('_')[1].split('.')[0]
+                
+                # Extract name from manifest using regex
+                import re
+                name_match = re.search(r'"name"\s+"([^"]+)"', manifest_content)
+                
+                if name_match:
+                    game_name = name_match.group(1)
+                    if game_title in game_name.lower():
+                        # Return steam:// URL protocol
+                        steam_url = f"steam://run/{app_id}"
+                        return steam_url, game_name
+            except Exception:
+                continue
+        
+        # Fallback to common folder if manifest approach fails
         common_path = os.path.join(steamapps_path, "common")
         if os.path.exists(common_path):
             for game_dir in os.listdir(common_path):
                 if game_title in game_dir.lower():
-                    # Found a potential match, look for executables
+                    # Found a potential match by folder name
+                    # Look for a corresponding manifest file
+                    for manifest_file in glob.glob(os.path.join(steamapps_path, "appmanifest_*.acf")):
+                        try:
+                            with open(manifest_file, 'r', encoding='utf-8') as f:
+                                manifest_content = f.read()
+                                
+                            if game_dir.lower() in manifest_content.lower():
+                                app_id = os.path.basename(manifest_file).split('_')[1].split('.')[0]
+                                steam_url = f"steam://run/{app_id}"
+                                return steam_url, game_dir
+                        except Exception:
+                            continue
+                    
+                    # If we couldn't find a manifest, fall back to executable
                     game_path = os.path.join(common_path, game_dir)
-                    exe_file = find_executable_in_directory(game_path)
+                    exe_file = _find_executable_in_directory(game_path)
                     if exe_file:
                         return exe_file, game_dir
     
     return None
 
 
-def get_steam_path() -> Optional[str]:
+def _get_steam_path() -> Optional[str]:
     """
     Get the Steam installation path from registry.
     """
@@ -127,7 +182,7 @@ def get_steam_path() -> Optional[str]:
     return None
 
 
-def get_steam_libraries(steam_path: str) -> List[str]:
+def _get_steam_libraries(steam_path: str) -> List[str]:
     """
     Get all Steam library folders.
     """
@@ -154,7 +209,7 @@ def get_steam_libraries(steam_path: str) -> List[str]:
     return libraries
 
 
-def find_epic_game(game_title: str) -> Optional[Tuple[str, str]]:
+def _find_epic_game(game_title: str) -> Optional[Tuple[str, str]]:
     """
     Find an Epic Games game by title.
     """
@@ -177,7 +232,7 @@ def find_epic_game(game_title: str) -> Optional[Tuple[str, str]]:
                         if game_title in display_name.lower():
                             install_location = manifest.get("InstallLocation", "")
                             if install_location and os.path.exists(install_location):
-                                exe_file = find_executable_in_directory(install_location)
+                                exe_file = _find_executable_in_directory(install_location)
                                 if exe_file:
                                     return exe_file, display_name
                     except Exception:
@@ -186,7 +241,7 @@ def find_epic_game(game_title: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def find_gog_game(game_title: str) -> Optional[Tuple[str, str]]:
+def _find_gog_game(game_title: str) -> Optional[Tuple[str, str]]:
     """
     Find a GOG game by title.
     """
@@ -201,14 +256,14 @@ def find_gog_game(game_title: str) -> Optional[Tuple[str, str]]:
             for game_dir in os.listdir(gog_dir):
                 if game_title in game_dir.lower():
                     game_path = os.path.join(gog_dir, game_dir)
-                    exe_file = find_executable_in_directory(game_path)
+                    exe_file = _find_executable_in_directory(game_path)
                     if exe_file:
                         return exe_file, game_dir
     
     return None
 
 
-def find_ea_game(game_title: str) -> Optional[Tuple[str, str]]:
+def _find_ea_game(game_title: str) -> Optional[Tuple[str, str]]:
     """
     Find an EA/Origin game by title.
     """
@@ -225,14 +280,14 @@ def find_ea_game(game_title: str) -> Optional[Tuple[str, str]]:
             for game_dir in os.listdir(ea_dir):
                 if game_title in game_dir.lower():
                     game_path = os.path.join(ea_dir, game_dir)
-                    exe_file = find_executable_in_directory(game_path)
+                    exe_file = _find_executable_in_directory(game_path)
                     if exe_file:
                         return exe_file, game_dir
     
     return None
 
 
-def find_battlenet_game(game_title: str) -> Optional[Tuple[str, str]]:
+def _find_battlenet_game(game_title: str) -> Optional[Tuple[str, str]]:
     """
     Find a Battle.net game by title.
     """
@@ -272,14 +327,14 @@ def find_battlenet_game(game_title: str) -> Optional[Tuple[str, str]]:
         for battlenet_dir in battlenet_dirs:
             potential_path = os.path.join(battlenet_dir, matched_dir)
             if os.path.exists(potential_path):
-                exe_file = find_executable_in_directory(potential_path)
+                exe_file = _find_executable_in_directory(potential_path)
                 if exe_file:
                     return exe_file, matched_dir
     
     return None
 
 
-def find_game_in_common_locations(game_title: str) -> Optional[Tuple[str, str]]:
+def _find_game_in_common_locations(game_title: str) -> Optional[Tuple[str, str]]:
     """
     Find a game in common installation locations.
     """
@@ -308,7 +363,7 @@ def find_game_in_common_locations(game_title: str) -> Optional[Tuple[str, str]]:
                     continue
                 
                 if game_title in root.lower():
-                    exe_file = find_executable_in_directory(root)
+                    exe_file = _find_executable_in_directory(root)
                     if exe_file:
                         game_name = os.path.basename(root)
                         return exe_file, game_name
@@ -317,14 +372,14 @@ def find_game_in_common_locations(game_title: str) -> Optional[Tuple[str, str]]:
                 for dir_name in dirs:
                     if game_title in dir_name.lower():
                         dir_path = os.path.join(root, dir_name)
-                        exe_file = find_executable_in_directory(dir_path)
+                        exe_file = _find_executable_in_directory(dir_path)
                         if exe_file:
                             return exe_file, dir_name
     
     return None
 
 
-def find_executable_in_directory(directory: str) -> Optional[Tuple[str, str]]:
+def _find_executable_in_directory(directory: str) -> Optional[Tuple[str, str]]:
     """
     Find a suitable executable file in the directory.
     
@@ -377,11 +432,11 @@ def find_executable_in_directory(directory: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-# Testing code
+# For testing
 if __name__ == "__main__":
     while True:
         game_input = input("Enter a game title to launch (or 'exit' to quit): ")
         if game_input.lower() == 'exit':
             break
-        result = find_and_launch_game(game_input)
+        result = launch_game(game_input)
         print(result)

@@ -53,13 +53,19 @@ except ImportError as e:
     def close_app(app_name):
         return f"Error: Close app tool unavailable - {str(e)}"
 
+try:
+    from agent_tools.game_launcher_tool import launch_game
+except ImportError as e:
+    def launch_game(game_title):
+        return f"Error: Game launcher tool unavailable - {str(e)}"
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
         self.page = page
         self.messages = []
         self.tools = [self.launch_apps, self.take_screenshot_wrapper, 
-                     self.web_search_wrapper, self.get_system_info, self.close_apps]
+                     self.web_search_wrapper, self.get_system_info, self.close_apps, self.launch_game_wrapper]
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -88,7 +94,12 @@ class OllamaAgentGUI:
             "2. close_apps(app_name): Close applications by partial name match\n" +
             "3. take_screenshot_wrapper(save_path=None, window_title=None): Capture screenshot; optionally specify path and window\n" +
             "4. web_search_wrapper(query, max_results=5): Search the web using DuckDuckGo\n" +
-            "5. get_system_info(info_type='all'): Get system information - options: 'all', 'cpu', 'memory', 'disk', 'network', 'os', 'processes'\n\n" +
+            "5. get_system_info(info_type='all'): Get system information - options: 'all', 'cpu', 'memory', 'disk', 'network', 'os', 'processes'\n" +
+            "6. launch_game_wrapper(game_title): Find and launch a PC game by title\n\n" +
+
+            "IMPORTANT NOTE: the launch_apps tool and launch_game_wrapper tool are different.\n" +
+            "the launch_app tool is for applications (steam, discord, spotify, etc) while the launch_game_wrapper tool is used ONLY for launching games.\n" +
+            "SIMPLE WAY TO REMEMBER: VIDEO GAME = launch_game_wrapper tool, REGULAR APP = launch_app tool\n\n" +
             
             "CRITICAL RULES TO FOLLOW:\n" +
             "1. NEVER invent tools or parameters that weren't explicitly provided to you\n" +
@@ -513,6 +524,13 @@ class OllamaAgentGUI:
             return close_app(app_name=app_name)
         else:
             return "Error: Invalid or empty application name. Please provide a valid application name."
+            
+    def launch_game_wrapper(self, game_title: str) -> str:
+        """Find and launch a PC game by title."""
+        if isinstance(game_title, str) and game_title.strip():
+            return launch_game(game_title)
+        else:
+            return "Error: Invalid or empty game title. Please provide a valid game title."
 
 
 def main(page: ft.Page):
