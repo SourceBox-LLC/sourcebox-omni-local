@@ -59,13 +59,59 @@ except ImportError as e:
     def launch_game(game_title):
         return f"Error: Game launcher tool unavailable - {str(e)}"
 
+try:
+    from agent_tools.file_ops_tool import FileOperationsTool
+except ImportError as e:
+    class FileOperationsTool:
+        def __init__(self):
+            pass
+        
+        def list_directory(self, path=None, pattern=None, show_hidden=False, sort_by="name", reverse=False):
+            return {"error": f"File operations tool unavailable - {str(e)}"}
+        
+        def copy_item(self, source, destination, overwrite=False):
+            return {"error": f"File operations tool unavailable - {str(e)}"}
+            
+        def move_item(self, source, destination, overwrite=False):
+            return {"error": f"File operations tool unavailable - {str(e)}"}
+            
+        def delete_item(self, path, recursive=False):
+            return {"error": f"File operations tool unavailable - {str(e)}"}
+            
+        def rename_item(self, path, new_name):
+            return {"error": f"File operations tool unavailable - {str(e)}"}
+            
+        def create_directory(self, path):
+            return {"error": f"File operations tool unavailable - {str(e)}"}
+            
+        def create_file(self, path, content="", overwrite=False, encoding="utf-8"):
+            return {"error": f"File operations tool unavailable - {str(e)}"}
+
+try:
+    from agent_tools.editor_tool import open_folder_in_editor, get_available_editors
+except ImportError as e:
+    def open_folder_in_editor(folder, editor_name=None):
+        return {"success": False, "error": f"Editor tool unavailable - {str(e)}"}
+    
+    def get_available_editors():
+        return {"error": f"Editor tool unavailable - {str(e)}"}
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
         self.page = page
         self.messages = []
+        # Initialize file operations tool
+        self.file_ops = FileOperationsTool()
         self.tools = [self.launch_apps, self.take_screenshot_wrapper, 
-                     self.web_search_wrapper, self.get_system_info, self.close_apps, self.launch_game_wrapper]
+                     self.web_search_wrapper, self.get_system_info, self.close_apps, 
+                     self.launch_game_wrapper, 
+                     # File operations tools
+                     self.list_directory, self.copy_file, self.move_file, 
+                     self.delete_file, self.rename_file, self.create_directory, 
+                     self.create_file,
+                     # Editor tool
+                     self.open_in_editor]
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -96,6 +142,15 @@ class OllamaAgentGUI:
             "4. web_search_wrapper(query, max_results=5): Search the web using DuckDuckGo\n" +
             "5. get_system_info(info_type='all'): Get system information - options: 'all', 'cpu', 'memory', 'disk', 'network', 'os', 'processes'\n" +
             "6. launch_game_wrapper(game_title): Find and launch a PC game by title\n\n" +
+            "FILE OPERATIONS TOOLS:\n" +
+            "7. list_directory(path=None, pattern=None, show_hidden=False, sort_by='name', reverse=False): List files and directories in the specified path\n" +
+            "8. copy_file(source, destination, overwrite=False): Copy a file or directory to the destination path\n" +
+            "9. move_file(source, destination, overwrite=False): Move a file or directory to the destination path\n" +
+            "10. delete_file(path, recursive=False): Delete a file or directory (recursive for non-empty directories)\n" +
+            "11. rename_file(path, new_name): Rename a file or directory to a new name\n" +
+            "12. create_directory(path): Create a new directory at the specified path\n" +
+            "13. create_file(path, content='', overwrite=False, encoding='utf-8'): Create a new file with optional content\n" +
+            "14. open_in_editor(folder_path=None, editor_name=None): Open a folder in code editor or file explorer (if no path provided, lists available editors)\n\n" +
 
             "IMPORTANT NOTE: the launch_apps tool and launch_game_wrapper tool are different.\n" +
             "the launch_app tool is for applications (steam, discord, spotify, etc) while the launch_game_wrapper tool is used ONLY for launching games.\n" +
@@ -115,9 +170,15 @@ class OllamaAgentGUI:
             "2. After the tool executes, ALWAYS respond to the user with the results - NEVER leave the tool output unexplained\n" +
             "3. DO NOT append text like '[Agent executes: tool_name()]' to your responses - this is ONLY for explanation in this prompt\n" +
             "4. IMMEDIATELY execute the tool when asked, then share and explain the results\n\n" +
+
+            "typing your tools in text does nothing you must actually invoke them\n\n" +
             
             "Be direct, accurate and concise. Focus only on executing the requested tasks through the available tools\n" +
-            "and following up with a conversation. You are an agent with tools but also conversational."
+            "and following up with a conversation. You are an agent with tools but also conversational.\n\n" +
+            
+            "Reminder that you must ACTUALLY EXECUTE tools, not just state tool calls. No writing tool calls in the chat. only invoke them manually\n\n" +
+            "ALWAYS END TOOL INVOKATION(S) WITH A REAL CONVERSATIONAL RESPONSE\n\n" +
+            "ALWAYS END YOUR RESPONSE WITH A REAL CONVERSATIONAL RESPONSE"
         )
         self.messages = [{"role": "system", "content": system_msg}]
         
@@ -531,6 +592,162 @@ class OllamaAgentGUI:
             return launch_game(game_title)
         else:
             return "Error: Invalid or empty game title. Please provide a valid game title."
+            
+    # File Operations Tool Wrappers
+    def list_directory(self, path=None, pattern=None, show_hidden=False, sort_by="name", reverse=False) -> str:
+        """List files and directories with filtering and sorting options.
+        
+        Args:
+            path: Directory path to list (default: current working directory)
+            pattern: Optional file pattern to filter (e.g., '*.txt')
+            show_hidden: Whether to include hidden files
+            sort_by: Sort method ('name', 'size', 'type', 'modified')
+            reverse: Whether to reverse sort order
+        """
+        result = self.file_ops.list_directory(path, pattern, show_hidden, sort_by, reverse)
+        if "error" in result and result["error"] is not None:
+            return f"Error listing directory: {result['error']}"
+        
+        # Format the output in a readable way
+        output = [f"📂 Directory: {result['current_path']}", ""] 
+        
+        # Directories
+        if result['directories']:
+            output.append(f"Directories ({result['total_dirs']}):")
+            for idx, d in enumerate(result['directories'], 1):
+                output.append(f"{idx}. 📁 {d['name']} - Modified: {d['modified_date']}")
+            output.append("")
+        
+        # Files
+        if result['files']:
+            output.append(f"Files ({result['total_files']}):")
+            for idx, f in enumerate(result['files'], 1):
+                output.append(f"{idx}. 📄 {f['name']} - Size: {f['size_human']}, Modified: {f['modified_date']}")
+        
+        if not result['directories'] and not result['files']:
+            output.append("(Empty directory)")
+            
+        return "\n".join(output)
+    
+    def copy_file(self, source, destination, overwrite=False) -> str:
+        """Copy a file or directory to destination.
+        
+        Args:
+            source: Source file or directory path
+            destination: Destination path
+            overwrite: Whether to overwrite if destination exists
+        """
+        result = self.file_ops.copy_item(source, destination, overwrite)
+        if result.get("success"):
+            item_type = result.get("type", "item")
+            return f"✅ Successfully copied {item_type} from '{result['source']}' to '{result['destination']}'"
+        else:
+            return f"Error copying file: {result.get('error', 'Unknown error')}"
+    
+    def move_file(self, source, destination, overwrite=False) -> str:
+        """Move a file or directory to destination.
+        
+        Args:
+            source: Source file or directory path
+            destination: Destination path
+            overwrite: Whether to overwrite if destination exists
+        """
+        result = self.file_ops.move_item(source, destination, overwrite)
+        if result.get("success"):
+            item_type = result.get("type", "item")
+            return f"✅ Successfully moved {item_type} from '{result['source']}' to '{result['destination']}'"
+        else:
+            return f"Error moving file: {result.get('error', 'Unknown error')}"
+    
+    def delete_file(self, path, recursive=False) -> str:
+        """Delete a file or directory.
+        
+        Args:
+            path: Path to delete
+            recursive: For directories, whether to delete contents recursively
+        """
+        result = self.file_ops.delete_item(path, recursive)
+        if result.get("success"):
+            item_type = result.get("type", "item")
+            return f"✅ Successfully deleted {item_type}: '{result['path']}'"
+        else:
+            return f"Error deleting file: {result.get('error', 'Unknown error')}"
+    
+    def rename_file(self, path, new_name) -> str:
+        """Rename a file or directory.
+        
+        Args:
+            path: Path to file or directory to rename
+            new_name: New name (without path)
+        """
+        result = self.file_ops.rename_item(path, new_name)
+        if result.get("success"):
+            item_type = result.get("type", "item")
+            return f"✅ Successfully renamed {item_type} from '{result['original']}' to '{result['new']}'"
+        else:
+            return f"Error renaming file: {result.get('error', 'Unknown error')}"
+    
+    def create_directory(self, path) -> str:
+        """Create a new directory.
+        
+        Args:
+            path: Directory path to create
+        """
+        result = self.file_ops.create_directory(path)
+        if result.get("success"):
+            return f"✅ Successfully created directory: '{result['path']}'"
+        else:
+            return f"Error creating directory: {result.get('error', 'Unknown error')}"
+    
+    def create_file(self, path, content="", overwrite=False, encoding="utf-8") -> str:
+        """Create a new file with content.
+        
+        Args:
+            path: File path to create
+            content: Text content for the file
+            overwrite: Whether to overwrite if file exists
+            encoding: File encoding (default: utf-8)
+        """
+        result = self.file_ops.create_file(path, content, overwrite, encoding)
+        if result.get("success"):
+            return f"✅ Successfully created file: '{result['path']}' ({result['size']} bytes)"
+        else:
+            return f"Error creating file: {result.get('error', 'Unknown error')}"
+    
+    # Editor Tool Wrapper
+    def open_in_editor(self, folder_path=None, editor_name=None) -> str:
+        """Open a folder in code editor or file explorer.
+        If no folder_path is provided, lists available editors on the system.
+        
+        Args:
+            folder_path: Path to the folder to open (or None to list editors)
+            editor_name: (Optional) Preferred editor name (e.g., 'vscode', 'pycharm')
+        """
+        # If no folder path provided, just list available editors
+        if not folder_path:
+            editors = get_available_editors()
+            
+            if isinstance(editors, dict) and "error" in editors:
+                return f"Error listing editors: {editors['error']}"
+                
+            if not editors:
+                return "No code editors were found on this system. Folders will open in the default file explorer."
+            
+            output = ["Available code editors:"]
+            for idx, (name, path) in enumerate(editors.items(), 1):
+                output.append(f"{idx}. {name} ({path})")
+            
+            return "\n".join(output)
+        
+        # Open folder in editor
+        result = open_folder_in_editor(folder_path, editor_name)
+        
+        if result.get("success"):
+            method = result.get("method", "editor")
+            path = result.get("path", folder_path)
+            return f"✅ Successfully opened folder: '{path}' in {method}"
+        else:
+            return f"Error opening folder: {result.get('error', 'Unknown error')}"
 
 
 def main(page: ft.Page):
