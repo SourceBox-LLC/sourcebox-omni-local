@@ -11,6 +11,8 @@ import time
 from typing import List, Dict, Any
 import flet as ft
 from ollama import chat, ChatResponse
+import datetime
+import platform
 
 # Add parent directory to path to import agent tools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -135,6 +137,11 @@ class OllamaAgentGUI:
             "You are an AI agent on Windows. You can ONLY perform actions by calling the exact Python functions " +
             "provided to you as tools. DO NOT HALLUCINATE OR INVENT tool calls or parameters that don't exist.\n\n" +
             
+            r"CURRENT USER: C:\Users\S'Bussiso \n" +
+            "CURRENT DATE: " + datetime.datetime.now().strftime("%Y-%m-%d") + "\n" +
+            "CURRENT TIME: " + datetime.datetime.now().strftime("%H:%M:%S") + "\n" +
+            "CURRENT OS: " + platform.system() + "\n" +
+
             "AVAILABLE TOOLS:\n" +
             "1. launch_apps(app_name): Launch applications by name\n" +
             "2. close_apps(app_name): Close applications by partial name match\n" +

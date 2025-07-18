@@ -28,7 +28,7 @@ class FileOperationsTool:
         path: Union[str, Path] = None,
         pattern: str = None,
         show_hidden: bool = False,
-        sort_by: str = "name",
+        sort_by: str = r"name",
         reverse: bool = False
     ) -> dict:
         """
@@ -47,9 +47,9 @@ class FileOperationsTool:
         try:
             base = Path(path or Path.cwd()).expanduser().resolve()
             if not base.exists():
-                return {"error": f"Path does not exist: {base}"}
+                return {r"error": f"Path does not exist: {base}"}
             if not base.is_dir():
-                return {"error": f"Path is not a directory: {base}"}
+                return {r"error": f"Path is not a directory: {base}"}
 
             dirs = []
             files = []
@@ -72,22 +72,22 @@ class FileOperationsTool:
 
                 stat_info = entry.stat()
                 info = {
-                    "name": name,
-                    "path": str(entry),
-                    "size": stat_info.st_size,
-                    "size_human": self._human_readable_size(stat_info.st_size),
-                    "modified": stat_info.st_mtime,
-                    "modified_date": datetime.fromtimestamp(stat_info.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
-                    "created": stat_info.st_ctime,
-                    "created_date": datetime.fromtimestamp(stat_info.st_ctime).strftime('%Y-%m-%d %H:%M:%S'),
-                    "is_hidden": name.startswith('.')
+                    r"name": name,
+                    r"path": str(entry),
+                    r"size": stat_info.st_size,
+                    r"size_human": self._human_readable_size(stat_info.st_size),
+                    r"modified": stat_info.st_mtime,
+                    r"modified_date": datetime.fromtimestamp(stat_info.st_mtime).strftime(r'%Y-%m-%d %H:%M:%S'),
+                    r"created": stat_info.st_ctime,
+                    r"created_date": datetime.fromtimestamp(stat_info.st_ctime).strftime(r'%Y-%m-%d %H:%M:%S'),
+                    r"is_hidden": name.startswith('.')
                 }
                 if entry.is_dir():
-                    info["type"] = "directory"
+                    info[r"type"] = r"directory"
                     dirs.append(info)
                 else:
-                    info["type"] = "file"
-                    info["extension"] = entry.suffix.lower().lstrip('.')
+                    info[r"type"] = r"file"
+                    info[r"extension"] = entry.suffix.lower().lstrip('.')
                     files.append(info)
 
             # Sorting
@@ -96,13 +96,13 @@ class FileOperationsTool:
             files.sort(key=keyfunc, reverse=reverse)
 
             result = {
-                "current_path": str(base),
-                "parent_path": str(base.parent),
-                "directories": dirs,
-                "files": files,
-                "total_dirs": len(dirs),
-                "total_files": len(files),
-                "error": None
+                r"current_path": str(base),
+                r"parent_path": str(base.parent),
+                r"directories": dirs,
+                r"files": files,
+                r"total_dirs": len(dirs),
+                r"total_files": len(files),
+                r"error": None
             }
             self._last_path = base
             self._last_result = result
@@ -137,10 +137,10 @@ class FileOperationsTool:
                     shutil.rmtree(dst)
                 shutil.copytree(src, dst)
                 op_type = "directory"
-            return {"operation": "copy", "type": op_type, "source": str(src), "destination": str(dst), "success": True}
+            return {r"operation": r"copy", r"type": op_type, r"source": str(src), r"destination": str(dst), r"success": True}
         except Exception as e:
             logger.exception("copy_item failed")
-            return {"operation": "copy", "error": str(e), "success": False}
+            return {r"operation": r"copy", r"error": str(e), r"success": False}
 
     def move_item(
         self,
@@ -166,10 +166,10 @@ class FileOperationsTool:
                     shutil.rmtree(dst)
             shutil.move(str(src), str(dst))
             op_type = "file" if src.is_file() else "directory"
-            return {"operation": "move", "type": op_type, "source": str(src), "destination": str(dst), "success": True}
+            return {r"operation": r"move", r"type": op_type, r"source": str(src), r"destination": str(dst), r"success": True}
         except Exception as e:
             logger.exception("move_item failed")
-            return {"operation": "move", "error": str(e), "success": False}
+            return {r"operation": r"move", r"error": str(e), r"success": False}
 
     def delete_item(self, path: Union[str, Path], recursive: bool = False) -> dict:
         """
@@ -190,11 +190,11 @@ class FileOperationsTool:
                     target.rmdir()
                     op_type = "directory"
                 else:
-                    return {"error": "Directory not empty and recursive=False", "success": False}
-            return {"operation": "delete", "type": op_type, "path": str(target), "success": True}
+                    return {r"error": r"Directory not empty and recursive=False", r"success": False}
+            return {r"operation": r"delete", r"type": op_type, r"path": str(target), r"success": True}
         except Exception as e:
             logger.exception("delete_item failed")
-            return {"operation": "delete", "error": str(e), "success": False}
+            return {r"operation": r"delete", r"error": str(e), r"success": False}
 
     def rename_item(self, path: Union[str, Path], new_name: str) -> dict:
         """
@@ -211,10 +211,10 @@ class FileOperationsTool:
         try:
             target.rename(new_path)
             op_type = "file" if new_path.is_file() else "directory"
-            return {"operation": "rename", "type": op_type, "original": str(target), "new": str(new_path), "success": True}
+            return {r"operation": r"rename", r"type": op_type, r"original": str(target), r"new": str(new_path), r"success": True}
         except Exception as e:
             logger.exception("rename_item failed")
-            return {"operation": "rename", "error": str(e), "success": False}
+            return {r"operation": r"rename", r"error": str(e), r"success": False}
 
     def create_directory(self, path: Union[str, Path]) -> dict:
         """
@@ -225,10 +225,10 @@ class FileOperationsTool:
             return {"error": f"Path already exists: {target}", "success": False}
         try:
             target.mkdir(parents=True, exist_ok=False)
-            return {"operation": "create_directory", "path": str(target), "success": True}
+            return {r"operation": r"create_directory", r"path": str(target), r"success": True}
         except Exception as e:
             logger.exception("create_directory failed")
-            return {"operation": "create_directory", "error": str(e), "success": False}
+            return {r"operation": r"create_directory", r"error": str(e), r"success": False}
 
     def create_file(
         self,
@@ -246,7 +246,7 @@ class FileOperationsTool:
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding=encoding)
-            return {"operation": "create_file", "path": str(target), "size": len(content), "success": True}
+            return {r"operation": r"create_file", r"path": str(target), r"size": len(content), r"success": True}
         except Exception as e:
             logger.exception("create_file failed")
-            return {"operation": "create_file", "error": str(e), "success":False}
+            return {r"operation": r"create_file", r"error": str(e), r"success":False}
