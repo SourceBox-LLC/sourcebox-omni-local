@@ -32,7 +32,7 @@ except ImportError as e:
 try:
     from agent_tools.screenshot_tool import take_screenshot
 except ImportError as e:
-    def take_screenshot(save_path=None, window_title=None):
+    def take_screenshot(window_title=None):
         return f"Error: Screenshot tool unavailable - {str(e)}. Please install pyautogui: pip install pyautogui"
 
 try:
@@ -92,7 +92,7 @@ class OllamaAgentGUI:
             "AVAILABLE TOOLS:\n" +
             "1. launch_apps(app_name): Launch applications by name\n" +
             "2. close_apps(app_name): Close applications by partial name match\n" +
-            "3. take_screenshot_wrapper(save_path=None, window_title=None): Capture screenshot; optionally specify path and window\n" +
+            "3. take_screenshot_wrapper(window_title=None): Capture screenshot and save to Desktop/Screenshots; optionally specify window to focus\n" +
             "4. web_search_wrapper(query, max_results=5): Search the web using DuckDuckGo\n" +
             "5. get_system_info(info_type='all'): Get system information - options: 'all', 'cpu', 'memory', 'disk', 'network', 'os', 'processes'\n" +
             "6. launch_game_wrapper(game_title): Find and launch a PC game by title\n\n" +
@@ -503,9 +503,9 @@ class OllamaAgentGUI:
         """Launch an application by name."""
         return launch_app(app_name)
 
-    def take_screenshot_wrapper(self, save_path: str = None, window_title: str = None) -> str:
-        """Take a screenshot and save it to the specified path."""
-        return take_screenshot(save_path=save_path, window_title=window_title)
+    def take_screenshot_wrapper(self, window_title: str = None) -> str:
+        """Take a screenshot and save it to Desktop/Screenshots folder."""
+        return take_screenshot(window_title=window_title)
 
     def web_search_wrapper(self, query: str, max_results: int = 5) -> str:
         """Search the web for the given query using DuckDuckGo."""
