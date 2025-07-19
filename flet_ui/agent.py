@@ -98,6 +98,18 @@ except ImportError as e:
     def get_available_editors():
         return {"error": f"Editor tool unavailable - {str(e)}"}
 
+try:
+    from agent_tools.image_gen_tool import generate_image
+except ImportError as e:
+    def generate_image(prompt, save_path="output.png"):
+        return f"Error: Image generation tool unavailable - {str(e)}. Please install replicate: pip install replicate"
+
+try:
+    from agent_tools.wallpaper_tool import set_wallpaper
+except ImportError as e:
+    def set_wallpaper(image_path):
+        return f"Error: Wallpaper tool unavailable - {str(e)}"
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
@@ -113,7 +125,11 @@ class OllamaAgentGUI:
                      self.delete_file, self.rename_file, self.create_directory, 
                      self.create_file,
                      # Editor tool
-                     self.open_in_editor]
+                     self.open_in_editor,
+                     # Image generation tool
+                     self.generate_image_wrapper,
+                     # Wallpaper tool
+                     self.set_wallpaper_wrapper]
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -134,10 +150,11 @@ class OllamaAgentGUI:
     def setup_system_message(self):
         """Initialize the system message (same as console agent)"""
         system_msg = (
-            "You are an AI agent on Windows. You can ONLY perform actions by calling the exact Python functions " +
-            "provided to you as tools. DO NOT HALLUCINATE OR INVENT tool calls or parameters that don't exist.\n\n" +
+            "You are an AI agent on Windows. You achieve goals by invoking under the hood, built in tools. " +
             
-            r"CURRENT USER: C:\Users\S'Bussiso \n" +
+            "This  .\n"
+            
+            "CURRENT USER: C:\\Users\\S'Bussiso\n" +
             "CURRENT DATE: " + datetime.datetime.now().strftime("%Y-%m-%d") + "\n" +
             "CURRENT TIME: " + datetime.datetime.now().strftime("%H:%M:%S") + "\n" +
             "CURRENT OS: " + platform.system() + "\n" +
@@ -157,35 +174,18 @@ class OllamaAgentGUI:
             "11. rename_file(path, new_name): Rename a file or directory to a new name\n" +
             "12. create_directory(path): Create a new directory at the specified path\n" +
             "13. create_file(path, content='', overwrite=False, encoding='utf-8'): Create a new file with optional content\n" +
-            "14. open_in_editor(folder_path=None, editor_name=None): Open a folder in code editor or file explorer (if no path provided, lists available editors)\n\n" +
+            "14. open_in_editor(folder_path=None, editor_name=None): Open a folder in code editor or file explorer (if no path provided, lists available editors)\n" +
+            "15. generate_image_wrapper(prompt, save_path='output.png'): Generate an AI image from text prompt and save to specified path\n" +
+            "16. set_wallpaper_wrapper(image_path): Set Windows desktop wallpaper to the specified image file\n\n" +
 
             "IMPORTANT NOTE: the launch_apps tool and launch_game_wrapper tool are different.\n" +
             "the launch_app tool is for applications (steam, discord, spotify, etc) while the launch_game_wrapper tool is used ONLY for launching games.\n" +
-            "SIMPLE WAY TO REMEMBER: VIDEO GAME = launch_game_wrapper tool, REGULAR APP = launch_app tool\n\n" +
+            "SIMPLE WAY TO REMEMBER: VIDEO GAME = launch_game_wrapper tool, REGULAR APP = launch_app tool\n\n"
             
-            "CRITICAL RULES TO FOLLOW:\n" +
-            "1. NEVER invent tools or parameters that weren't explicitly provided to you\n" +
-            "2. ALWAYS use the exact function signatures as defined - no additional parameters\n" +
-            "3. DO NOT fabricate tool outputs or responses - only report what the tools actually return\n" +
-            "4. ONLY report the EXACT parameters that were actually provided to the tool\n" +
-            "5. After calling a tool, DO NOT repeat or summarize the tool call with fabricated parameters\n" +
-            "6. DO NOT generate fake command-line style arguments, quotes, or JSON output\n" +
-            "7. With path handling, remember that Windows paths with spaces or special characters need proper quoting\n\n" +
-            
-            "CRITICAL WORKFLOW INSTRUCTIONS:\n" +
-            "1. When a user asks you to perform an action, do NOT just state the tool call - ACTUALLY EXECUTE the appropriate tool\n" +
-            "2. After the tool executes, ALWAYS respond to the user with the results - NEVER leave the tool output unexplained\n" +
-            "3. DO NOT append text like '[Agent executes: tool_name()]' to your responses - this is ONLY for explanation in this prompt\n" +
-            "4. IMMEDIATELY execute the tool when asked, then share and explain the results\n\n" +
 
-            "typing your tools in text does nothing you must actually invoke them\n\n" +
+
             
-            "Be direct, accurate and concise. Focus only on executing the requested tasks through the available tools\n" +
-            "and following up with a conversation. You are an agent with tools but also conversational.\n\n" +
-            
-            "Reminder that you must ACTUALLY EXECUTE tools, not just state tool calls. No writing tool calls in the chat. only invoke them manually\n\n" +
-            "ALWAYS END TOOL INVOKATION(S) WITH A REAL CONVERSATIONAL RESPONSE\n\n" +
-            "ALWAYS END YOUR RESPONSE WITH A REAL CONVERSATIONAL RESPONSE"
+
         )
         self.messages = [{"role": "system", "content": system_msg}]
         
@@ -500,7 +500,7 @@ class OllamaAgentGUI:
             
             # Get response from Ollama with tools
             response: ChatResponse = chat(
-                model="llama3.1",
+                model="qwen3", #llama3.1
                 messages=self.messages,
                 tools=self.tools,
                 stream=False
@@ -542,7 +542,7 @@ class OllamaAgentGUI:
             if response.message.tool_calls:
                 self.update_status("💭 Generating response...", ft.Colors.BLUE_400)
                 final: ChatResponse = chat(
-                    model="llama3.1",
+                    model="qwen3", #llama3.1
                     messages=self.messages
                 )
                 final_response = final.message.content
@@ -755,6 +755,31 @@ class OllamaAgentGUI:
             return f"✅ Successfully opened folder: '{path}' in {method}"
         else:
             return f"Error opening folder: {result.get('error', 'Unknown error')}"
+    
+    def generate_image_wrapper(self, prompt: str, save_path: str = "output.png") -> str:
+        """Generate an image using AI based on the provided prompt.
+        
+        Args:
+            prompt: Text description of the image to generate
+            save_path: Optional path where to save the generated image (default: output.png)
+        """
+        try:
+            result = generate_image(prompt, save_path)
+            return result
+        except Exception as e:
+            return f"Error generating image: {str(e)}"
+    
+    def set_wallpaper_wrapper(self, image_path: str) -> str:
+        """Set the Windows desktop wallpaper to the specified image.
+        
+        Args:
+            image_path: Full path to the image file to set as wallpaper
+        """
+        try:
+            result = set_wallpaper(image_path)
+            return result
+        except Exception as e:
+            return f"Error setting wallpaper: {str(e)}"
 
 
 def main(page: ft.Page):

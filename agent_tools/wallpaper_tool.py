@@ -8,13 +8,18 @@ import ctypes
 from ctypes import wintypes
 from pathlib import Path
 from typing import Dict, Any
+import logging
+
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Windows API constants
 SPI_SETDESKWALLPAPER = 20
 SPIF_UPDATEINIFILE = 0x01
 SPIF_SENDCHANGE = 0x02
 
-def set_wallpaper(image_path: str) -> Dict[str, Any]:
+def set_wallpaper(image_path: str) -> str:
     """
     Set the Windows desktop wallpaper to the specified image.
     
@@ -22,7 +27,7 @@ def set_wallpaper(image_path: str) -> Dict[str, Any]:
         image_path (str): Full path to the image file
         
     Returns:
-        Dict[str, Any]: Result dictionary with success status and message
+        str: Success message or error description
     """
     try:
         # Convert to Path object and resolve
@@ -30,25 +35,16 @@ def set_wallpaper(image_path: str) -> Dict[str, Any]:
         
         # Check if file exists
         if not image_file.exists():
-            return {
-                "success": False,
-                "error": f"Image file does not exist: {image_file}"
-            }
+            return f"❌ Error: Image file does not exist: {image_file}"
         
         # Check if it's a file (not a directory)
         if not image_file.is_file():
-            return {
-                "success": False,
-                "error": f"Path is not a file: {image_file}"
-            }
+            return f"❌ Error: Path is not a file: {image_file}"
         
         # Check if it's a supported image format
         supported_formats = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'}
         if image_file.suffix.lower() not in supported_formats:
-            return {
-                "success": False,
-                "error": f"Unsupported image format: {image_file.suffix}. Supported: {', '.join(supported_formats)}"
-            }
+            return f"❌ Error: Unsupported image format: {image_file.suffix}. Supported formats: {', '.join(supported_formats)}"
         
         # Convert path to string for Windows API
         wallpaper_path = str(image_file)
@@ -62,24 +58,17 @@ def set_wallpaper(image_path: str) -> Dict[str, Any]:
         )
         
         if result:
-            return {
-                "success": True,
-                "message": f"Successfully set wallpaper to: {wallpaper_path}",
-                "path": wallpaper_path
-            }
+            logger.info(f"Successfully set wallpaper to: {wallpaper_path}")
+            return f"✅ Successfully set wallpaper to: {wallpaper_path}"
         else:
             # Get the last Windows error
             error_code = ctypes.windll.kernel32.GetLastError()
-            return {
-                "success": False,
-                "error": f"Failed to set wallpaper. Windows error code: {error_code}"
-            }
+            logger.error(f"Failed to set wallpaper. Windows error code: {error_code}")
+            return f"❌ Failed to set wallpaper. Windows error code: {error_code}"
             
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Error setting wallpaper: {str(e)}"
-        }
+        logger.exception("Error setting wallpaper")
+        return f"❌ Error setting wallpaper: {str(e)}"
 
 def get_current_wallpaper() -> Dict[str, Any]:
     """
@@ -132,15 +121,14 @@ def get_current_wallpaper() -> Dict[str, Any]:
         }
             
     except Exception as e:
+        logger.exception("Error getting current wallpaper")
         return {
             "success": False,
             "error": f"Error getting current wallpaper: {str(e)}"
         }
 
-def test_wallpaper_tool():
-    """
-    Test the wallpaper setter tool with user input.
-    """
+# For testing when run directly
+if __name__ == "__main__":
     print("Windows Wallpaper Setter Tool")
     print("=" * 30)
     
@@ -151,6 +139,8 @@ def test_wallpaper_tool():
         print(f"✅ {current['message']}")
     else:
         print(f"❌ {current['error']}")
+        if "note" in current:
+            print(f"ℹ️  {current['note']}")
     
     # Ask user for new wallpaper path
     print("\n2. Set new wallpaper:")
@@ -158,23 +148,17 @@ def test_wallpaper_tool():
     
     if not image_path:
         print("❌ No path provided. Exiting.")
-        return
+        exit()
     
     print(f"\nAttempting to set wallpaper to: {image_path}")
     result = set_wallpaper(image_path)
+    print(result)
     
-    if result["success"]:
-        print(f"✅ {result['message']}")
-        print("\nWallpaper should now be updated on your desktop!")
+    if "Successfully set wallpaper" in result:
+        print("\n🎉 Wallpaper should now be updated on your desktop!")
     else:
-        print(f"❌ {result['error']}")
-        
-        # Provide some troubleshooting tips
-        print("\nTroubleshooting tips:")
+        print("\n💡 Troubleshooting tips:")
         print("- Make sure the file path is correct and the file exists")
         print("- Ensure the image is in a supported format (JPG, PNG, BMP, etc.)")
         print("- Try using a different image file")
         print("- Make sure you have permission to change system settings")
-
-if __name__ == "__main__":
-    test_wallpaper_tool()

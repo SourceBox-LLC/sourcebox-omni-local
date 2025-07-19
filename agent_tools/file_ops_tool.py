@@ -250,3 +250,27 @@ class FileOperationsTool:
         except Exception as e:
             logger.exception("create_file failed")
             return {r"operation": r"create_file", r"error": str(e), r"success":False}
+    
+    def _human_readable_size(self, size_bytes: int) -> str:
+        """Convert bytes to human readable format."""
+        if size_bytes == 0:
+            return "0 B"
+        
+        size_names = ["B", "KB", "MB", "GB", "TB"]
+        i = int(math.floor(math.log(size_bytes, 1024)))
+        p = math.pow(1024, i)
+        s = round(size_bytes / p, 2)
+        return f"{s} {size_names[i]}"
+    
+    def _get_sort_key(self, sort_by: str):
+        """Get the sort key function for the specified sort type."""
+        if sort_by == "name":
+            return lambda x: x["name"].lower()
+        elif sort_by == "size":
+            return lambda x: x["size"]
+        elif sort_by == "type":
+            return lambda x: (x["type"], x["name"].lower())
+        elif sort_by == "modified":
+            return lambda x: x["modified"]
+        else:
+            return lambda x: x["name"].lower()
