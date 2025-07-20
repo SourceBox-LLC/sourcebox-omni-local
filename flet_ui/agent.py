@@ -20,12 +20,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import tools from agent_tools package (same as console agent)
 # Handle missing dependencies gracefully
 try:
-    from agent_tools.shell_tool import shell
-except ImportError as e:
-    def shell(command):
-        return f"Error: Shell tool unavailable - {str(e)}"
-
-try:
     from agent_tools.launch_app_tool import launch_app
 except ImportError as e:
     def launch_app(app_name):
@@ -110,6 +104,14 @@ except ImportError as e:
     def set_wallpaper(image_path):
         return f"Error: Wallpaper tool unavailable - {str(e)}"
 
+try:
+    from agent_tools.webpage_extraction_tool import load_web_content
+    WEBPAGE_EXTRACTION_AVAILABLE = True
+except ImportError as e:
+    def load_web_content(urls):
+        return {"success": False, "error": f"Webpage extraction tool unavailable - {str(e)}", "content": ""}
+    WEBPAGE_EXTRACTION_AVAILABLE = False
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
@@ -129,7 +131,9 @@ class OllamaAgentGUI:
                      # Image generation tool
                      self.generate_image_wrapper,
                      # Wallpaper tool
-                     self.set_wallpaper_wrapper]
+                     self.set_wallpaper_wrapper,
+                     # Webpage extraction tool
+                     self.extract_webpage_content]
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -176,11 +180,16 @@ class OllamaAgentGUI:
             "13. create_file(path, content='', overwrite=False, encoding='utf-8'): Create a new file with optional content\n" +
             "14. open_in_editor(folder_path=None, editor_name=None): Open a folder in code editor or file explorer (if no path provided, lists available editors)\n" +
             "15. generate_image_wrapper(prompt, save_path='output.png'): Generate an AI image from text prompt and save to specified path\n" +
-            "16. set_wallpaper_wrapper(image_path): Set Windows desktop wallpaper to the specified image file\n\n" +
+            "16. set_wallpaper_wrapper(image_path): Set Windows desktop wallpaper to the specified image file\n" +
+            "17. extract_webpage_content(url): Extract and return the full content of a webpage for analysis\n\n" +
 
             "IMPORTANT NOTE: the launch_apps tool and launch_game_wrapper tool are different.\n" +
             "the launch_app tool is for applications (steam, discord, spotify, etc) while the launch_game_wrapper tool is used ONLY for launching games.\n" +
             "SIMPLE WAY TO REMEMBER: VIDEO GAME = launch_game_wrapper tool, REGULAR APP = launch_app tool\n\n"
+
+            "IMPORTANT NOTE: the web_search_tool and extract_webpage_content tool are different.\n" +
+            "the web_search_tool is used to broadly search the web using DuckDuckGo while the extract_webpage_content tool is used to extract the full content of a webpage for analysis.\n" +
+            "SIMPLE WAY TO REMEMBER: BROAD SEARCH = web_search_tool, DEEP SEARCH = extract_webpage_content tool\n\n"
             
 
 
@@ -315,13 +324,19 @@ class OllamaAgentGUI:
         # Add beautiful welcome message
         self.add_system_message(
             "🚀 Welcome to Local Ollama Agent!\n\n" +
-            "I'm your AI assistant ready to help with:\n" +
-            "💻 Shell commands & system operations\n" +
-            "🚀 Application launching\n" +
-            "📸 Screenshot capture\n" +
-            "🔍 Web search & research\n" +
-            "📊 System information & monitoring\n\n" +
-            "Just type your request below and I'll get to work!"
+            "I'm your AI assistant with powerful local capabilities:\n\n" +
+            "💻 System & File Operations\n" +
+            "  • File management & editing\n\n" +
+            "🎮 Media & Entertainment\n" +
+            "  • Game launching (Steam/Epic/Origin)\n" +
+            "  • Wallpaper management\n\n" +
+            "🌐 Web & Research\n" +
+            "  • Web search (DuckDuckGo)\n" +
+            "  • Full webpage content extraction\n\n" +
+            "🎨 Creative Tools\n" +
+            "  • AI image generation\n" +
+            "  • Screenshot capture\n\n" +
+            "💡 Just type what you need help with!"
         )
         
         # Main layout with modern structure
@@ -780,6 +795,27 @@ class OllamaAgentGUI:
             return result
         except Exception as e:
             return f"Error setting wallpaper: {str(e)}"
+            
+    def extract_webpage_content(self, url: str) -> str:
+        """Extract and return the full content of a webpage.
+        
+        Args:
+            url: The URL of the webpage to extract content from
+            
+        Returns:
+            str: The extracted content or error message
+        """
+        if not WEBPAGE_EXTRACTION_AVAILABLE:
+            return "Webpage extraction tool is not available. Please check dependencies."
+            
+        try:
+            result = load_web_content(url)
+            if result.get("success", False):
+                return result["content"]
+            else:
+                return f"Failed to extract webpage content: {result.get('error', 'Unknown error')}"
+        except Exception as e:
+            return f"Error extracting webpage content: {str(e)}"
 
 
 def main(page: ft.Page):
