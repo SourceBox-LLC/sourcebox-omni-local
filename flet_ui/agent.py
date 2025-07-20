@@ -346,6 +346,7 @@ class OllamaAgentGUI:
             "I'm your AI assistant with powerful local capabilities:\n\n" +
             "💻 System & File Operations\n" +
             "  • File management & editing\n\n" +
+            "  • Close running applications\n\n" +
             "🎮 Media & Entertainment\n" +
             "  • Game launching (Steam/Epic/Origin)\n" +
             "  • Wallpaper management\n\n" +
