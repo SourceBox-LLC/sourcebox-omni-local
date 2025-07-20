@@ -112,6 +112,16 @@ except ImportError as e:
         return {"success": False, "error": f"Webpage extraction tool unavailable - {str(e)}", "content": ""}
     WEBPAGE_EXTRACTION_AVAILABLE = False
 
+try:
+    from agent_tools.close_app_by_name_tool import close_app_by_name, list_processes
+    CLOSE_APP_BY_NAME_AVAILABLE = True
+except ImportError as e:
+    def close_app_by_name(app_name, force_kill=False):
+        return f"Error: Close app by name tool unavailable - {str(e)}"
+    def list_processes():
+        return f"Error: Process listing tool unavailable - {str(e)}"
+    CLOSE_APP_BY_NAME_AVAILABLE = False
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
@@ -133,7 +143,10 @@ class OllamaAgentGUI:
                      # Wallpaper tool
                      self.set_wallpaper_wrapper,
                      # Webpage extraction tool
-                     self.extract_webpage_content]
+                     self.extract_webpage_content,
+                     # Close app by name tools
+                     self.close_app_by_name_wrapper,
+                     self.list_processes_wrapper]
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -181,7 +194,9 @@ class OllamaAgentGUI:
             "14. open_in_editor(folder_path=None, editor_name=None): Open a folder in code editor or file explorer (if no path provided, lists available editors)\n" +
             "15. generate_image_wrapper(prompt, save_path='output.png'): Generate an AI image from text prompt and save to specified path\n" +
             "16. set_wallpaper_wrapper(image_path): Set Windows desktop wallpaper to the specified image file\n" +
-            "17. extract_webpage_content(url): Extract and return the full content of a webpage for analysis\n\n" +
+            "17. extract_webpage_content(url): Extract and return the full content of a webpage for analysis\n" +
+            "18. close_app_by_name_wrapper(app_name, force_kill=False): Close applications by partial process name match with detailed results\n" +
+            "19. list_processes_wrapper(): List all running processes on the system\n\n" +
 
             "IMPORTANT NOTE: the launch_apps tool and launch_game_wrapper tool are different.\n" +
             "the launch_app tool is for applications (steam, discord, spotify, etc) while the launch_game_wrapper tool is used ONLY for launching games.\n" +
@@ -190,6 +205,10 @@ class OllamaAgentGUI:
             "IMPORTANT NOTE: the web_search_tool and extract_webpage_content tool are different.\n" +
             "the web_search_tool is used to broadly search the web using DuckDuckGo while the extract_webpage_content tool is used to extract the full content of a webpage for analysis.\n" +
             "SIMPLE WAY TO REMEMBER: BROAD SEARCH = web_search_tool, DEEP SEARCH = extract_webpage_content tool\n\n"
+
+            "IMPORTANT NOTE: close_apps and close_app_by_name_wrapper are different tools.\n" +
+            "close_apps is the original simple tool, while close_app_by_name_wrapper provides detailed process information and better control.\n" +
+            "SIMPLE WAY TO REMEMBER: DETAILED PROCESS CONTROL = close_app_by_name_wrapper, SIMPLE CLOSE = close_apps\n\n"
             
 
 
@@ -816,6 +835,26 @@ class OllamaAgentGUI:
                 return f"Failed to extract webpage content: {result.get('error', 'Unknown error')}"
         except Exception as e:
             return f"Error extracting webpage content: {str(e)}"
+
+    def close_app_by_name_wrapper(self, app_name: str, force_kill: bool = False) -> str:
+        """Close applications by partial process name match"""
+        if not CLOSE_APP_BY_NAME_AVAILABLE:
+            return "Close app by name tool is not available. Please check dependencies."
+        try:
+            result = close_app_by_name(app_name, force_kill)
+            return result
+        except Exception as e:
+            return f"Error closing application: {str(e)}"
+
+    def list_processes_wrapper(self) -> str:
+        """List all running processes"""
+        if not CLOSE_APP_BY_NAME_AVAILABLE:
+            return "Process listing tool is not available. Please check dependencies."
+        try:
+            result = list_processes()
+            return result
+        except Exception as e:
+            return f"Error listing processes: {str(e)}"
 
 
 def main(page: ft.Page):
