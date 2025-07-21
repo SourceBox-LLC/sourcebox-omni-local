@@ -135,6 +135,9 @@ class OllamaAgentGUI:
         self.main_content = None
         # Settings manager
         self.settings = SettingsManager()
+        # Track pending settings changes
+        self.settings_changed = False
+        self.save_button = None
         self.tools = [self.launch_apps, self.take_screenshot_wrapper, 
                      self.web_search_wrapper, self.get_system_info, self.close_apps, 
                      self.launch_game_wrapper, 
@@ -166,7 +169,6 @@ class OllamaAgentGUI:
         self.page.window_height = 800
         self.page.window_min_width = 900
         self.page.window_min_height = 700
-        self.page.bgcolor = "#0a0a0a"
         self.page.window_title_bar_hidden = False
         self.page.window_title_bar_buttons_hidden = False
         
@@ -225,53 +227,55 @@ class OllamaAgentGUI:
         
     def create_ui(self):
         """Create the main UI components"""
-        # Modern Header with gradient-like effect
-        header = ft.Container(
+        # Get current theme colors
+        colors = self.settings.get_theme_colors()
+        
+        # Create header with dynamic styling
+        self.settings_button = ft.IconButton(
+            icon=ft.Icons.SETTINGS,
+            tooltip="Settings",
+            on_click=self.open_settings,
+            icon_color=colors["text_primary"],
+            bgcolor=colors["bg_secondary"],
+            style=ft.ButtonStyle(
+                shape=ft.CircleBorder(),
+                overlay_color=colors["border"]
+            )
+        )
+        
+        self.refresh_button = ft.IconButton(
+            icon=ft.Icons.REFRESH,
+            tooltip="Clear Chat",
+            on_click=self.clear_chat,
+            icon_color=colors["text_primary"],
+            bgcolor=colors["bg_secondary"],
+            style=ft.ButtonStyle(
+                shape=ft.CircleBorder(),
+                overlay_color=colors["border"]
+            )
+        )
+        
+        self.header = ft.Container(
             content=ft.Row([
                 ft.Container(
                     content=ft.Row([
-                        ft.Icon(ft.Icons.SMART_TOY, color="#00d4ff", size=32),
-                        ft.Text(
-                            "Local Ollama Agent", 
-                            size=28, 
-                            weight=ft.FontWeight.W_600,
-                            color="#ffffff"
-                        ),
-                    ], spacing=12),
+                        ft.Icon(ft.Icons.SMART_TOY, color=colors["accent"], size=30),
+                        ft.Text("🤖 Local Ollama Agent", size=20, weight=ft.FontWeight.BOLD, color=colors["text_primary"])
+                    ], spacing=10),
                     padding=ft.padding.only(left=20)
                 ),
                 ft.Container(expand=True),
                 ft.Container(
                     content=ft.Row([
-                        ft.IconButton(
-                            icon=ft.Icons.SETTINGS,
-                            tooltip="Settings",
-                            on_click=self.open_settings,
-                            icon_color="#ffffff",
-                            bgcolor="#1a1a1a",
-                            style=ft.ButtonStyle(
-                                shape=ft.CircleBorder(),
-                                overlay_color="#333333"
-                            )
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.REFRESH,
-                            tooltip="Clear Chat",
-                            on_click=self.clear_chat,
-                            icon_color="#ffffff",
-                            bgcolor="#1a1a1a",
-                            style=ft.ButtonStyle(
-                                shape=ft.CircleBorder(),
-                                overlay_color="#333333"
-                            )
-                        )
+                        self.settings_button,
+                        self.refresh_button
                     ], spacing=10),
                     padding=ft.padding.only(right=20)
                 )
             ]),
             height=80,
-            bgcolor="#1a1a1a",
-            border=ft.border.only(bottom=ft.BorderSide(2, "#333333")),
+            bgcolor=colors["bg_secondary"],
+            border=ft.border.only(bottom=ft.BorderSide(2, colors["border"])),
             padding=ft.padding.symmetric(vertical=15)
         )
         
@@ -379,7 +383,6 @@ class OllamaAgentGUI:
         )
         
         # Store UI components for navigation
-        self.header = header
         self.chat_area = chat_area
         self.input_area = input_area
         self.status_area = status_area
@@ -394,13 +397,19 @@ class OllamaAgentGUI:
         # Main layout with modern structure
         self.page.add(
             ft.Column([
-                header,
+                self.header,
                 self.main_content
             ], expand=True, spacing=0)
         )
         
+        # Apply the saved theme on startup
+        self.apply_theme()
+        
     def create_settings_page(self):
-        """Create the mock settings page UI"""
+        """Create the settings page UI with dynamic theming"""
+        # Get current theme colors
+        colors = self.settings.get_theme_colors()
+        
         # Settings header with back button
         settings_header = ft.Container(
             content=ft.Row([
@@ -408,24 +417,24 @@ class OllamaAgentGUI:
                     icon=ft.Icons.ARROW_BACK,
                     tooltip="Back to Chat",
                     on_click=self.back_to_chat,
-                    icon_color="#ffffff",
-                    bgcolor="#1a1a1a",
+                    icon_color=colors["text_primary"],
+                    bgcolor=colors["bg_secondary"],
                     style=ft.ButtonStyle(
                         shape=ft.CircleBorder(),
-                        overlay_color="#333333"
+                        overlay_color=colors["border"]
                     )
                 ),
                 ft.Text(
                     "Settings", 
                     size=24, 
                     weight=ft.FontWeight.W_600,
-                    color="#ffffff"
+                    color=colors["text_primary"]
                 ),
                 ft.Container(expand=True)
             ]),
             padding=ft.padding.all(20),
-            bgcolor="#1a1a1a",
-            border=ft.border.only(bottom=ft.BorderSide(2, "#333333"))
+            bgcolor=colors["bg_secondary"],
+            border=ft.border.only(bottom=ft.BorderSide(2, colors["border"]))
         )
         
         # Settings content
@@ -434,10 +443,10 @@ class OllamaAgentGUI:
                 # Theme Section
                 ft.Container(
                     content=ft.Column([
-                        ft.Text("🎨 Appearance", size=18, weight=ft.FontWeight.W_500, color="#00d4ff"),
-                        ft.Divider(color="#333333", height=1),
+                        ft.Text("🎨 Appearance", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+                        ft.Divider(color=colors["border"], height=1),
                         ft.Row([
-                            ft.Text("Theme", color="#ffffff", size=14),
+                            ft.Text("Theme", color=colors["text_primary"], size=14),
                             ft.Container(expand=True),
                             ft.Dropdown(
                                 width=150,
@@ -447,14 +456,14 @@ class OllamaAgentGUI:
                                     ft.dropdown.Option("Light"),
                                     ft.dropdown.Option("Auto")
                                 ],
-                                bgcolor="#2a2a2a",
-                                color="#ffffff",
-                                border_color="#333333",
+                                bgcolor=colors["bg_tertiary"],
+                                color=colors["text_primary"],
+                                border_color=colors["border"],
                                 on_change=self.on_theme_change
                             )
                         ]),
                         ft.Row([
-                            ft.Text("Accent Color", color="#ffffff", size=14),
+                            ft.Text("Accent Color", color=colors["text_primary"], size=14),
                             ft.Container(expand=True),
                             ft.Dropdown(
                                 width=150,
@@ -465,27 +474,27 @@ class OllamaAgentGUI:
                                     ft.dropdown.Option("Purple"),
                                     ft.dropdown.Option("Orange")
                                 ],
-                                bgcolor="#2a2a2a",
-                                color="#ffffff",
-                                border_color="#333333",
+                                bgcolor=colors["bg_tertiary"],
+                                color=colors["text_primary"],
+                                border_color=colors["border"],
                                 on_change=self.on_accent_change
                             )
                         ])
                     ]),
                     padding=ft.padding.all(20),
                     margin=ft.margin.all(10),
-                    bgcolor="#1a1a1a",
+                    bgcolor=colors["bg_secondary"],
                     border_radius=10,
-                    border=ft.border.all(1, "#333333")
+                    border=ft.border.all(1, colors["border"])
                 ),
                 
                 # Model Section
                 ft.Container(
                     content=ft.Column([
-                        ft.Text("🤖 AI Model", size=18, weight=ft.FontWeight.W_500, color="#00d4ff"),
-                        ft.Divider(color="#333333", height=1),
+                        ft.Text("🤖 AI Model", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+                        ft.Divider(color=colors["border"], height=1),
                         ft.Row([
-                            ft.Text("Model", color="#ffffff", size=14),
+                            ft.Text("Model", color=colors["text_primary"], size=14),
                             ft.Container(expand=True),
                             ft.Dropdown(
                                 width=200,
@@ -494,32 +503,32 @@ class OllamaAgentGUI:
                                     ft.dropdown.Option("llama3.1"),
                                     ft.dropdown.Option("qwen3")
                                 ],
-                                bgcolor="#2a2a2a",
-                                color="#ffffff",
-                                border_color="#333333",
+                                bgcolor=colors["bg_tertiary"],
+                                color=colors["text_primary"],
+                                border_color=colors["border"],
                                 on_change=self.on_model_change
                             )
                         ])
                     ]),
                     padding=ft.padding.all(20),
                     margin=ft.margin.all(10),
-                    bgcolor="#1a1a1a",
+                    bgcolor=colors["bg_secondary"],
                     border_radius=10,
-                    border=ft.border.all(1, "#333333")
+                    border=ft.border.all(1, colors["border"])
                 ),
                 
                 # Tools Section
                 ft.Container(
                     content=ft.Column([
-                        ft.Text("🛠️ Tools & Features", size=18, weight=ft.FontWeight.W_500, color="#00d4ff"),
-                        ft.Divider(color="#333333", height=1),
+                        ft.Text("🛠️ Tools & Features", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+                        ft.Divider(color=colors["border"], height=1),
                         ft.Row([
                             ft.Checkbox(
                                 value=self.settings.get("tools", "screenshot_tool"),
                                 active_color="#00d4ff",
                                 on_change=lambda e: self.on_tool_toggle("screenshot_tool", e.control.value)
                             ),
-                            ft.Text("Screenshot Tool", color="#ffffff", size=14)
+                            ft.Text("Screenshot Tool", color=colors["text_primary"], size=14)
                         ]),
                         ft.Row([
                             ft.Checkbox(
@@ -527,7 +536,7 @@ class OllamaAgentGUI:
                                 active_color="#00d4ff",
                                 on_change=lambda e: self.on_tool_toggle("web_search", e.control.value)
                             ),
-                            ft.Text("Web Search", color="#ffffff", size=14)
+                            ft.Text("Web Search", color=colors["text_primary"], size=14)
                         ]),
                         ft.Row([
                             ft.Checkbox(
@@ -535,7 +544,7 @@ class OllamaAgentGUI:
                                 active_color="#00d4ff",
                                 on_change=lambda e: self.on_tool_toggle("file_operations", e.control.value)
                             ),
-                            ft.Text("File Operations", color="#ffffff", size=14)
+                            ft.Text("File Operations", color=colors["text_primary"], size=14)
                         ]),
                         ft.Row([
                             ft.Checkbox(
@@ -543,7 +552,7 @@ class OllamaAgentGUI:
                                 active_color="#00d4ff",
                                 on_change=lambda e: self.on_tool_toggle("game_launcher", e.control.value)
                             ),
-                            ft.Text("Game Launcher", color="#ffffff", size=14)
+                            ft.Text("Game Launcher", color=colors["text_primary"], size=14)
                         ]),
                         ft.Row([
                             ft.Checkbox(
@@ -551,35 +560,38 @@ class OllamaAgentGUI:
                                 active_color="#00d4ff",
                                 on_change=lambda e: self.on_tool_toggle("image_generation", e.control.value)
                             ),
-                            ft.Text("Image Generation", color="#ffffff", size=14)
+                            ft.Text("Image Generation", color=colors["text_primary"], size=14)
                         ])
                     ]),
                     padding=ft.padding.all(20),
                     margin=ft.margin.all(10),
-                    bgcolor="#1a1a1a",
+                    bgcolor=colors["bg_secondary"],
                     border_radius=10,
-                    border=ft.border.all(1, "#333333")
+                    border=ft.border.all(1, colors["border"])
                 ),
                 
                 # About Section
                 ft.Container(
                     content=ft.Column([
-                        ft.Text("ℹ️ About", size=18, weight=ft.FontWeight.W_500, color="#00d4ff"),
-                        ft.Divider(color="#333333", height=1),
-                        ft.Text("Local Ollama Agent v1.0", color="#ffffff", size=14),
-                        ft.Text("AI-powered desktop assistant", color="#888888", size=12),
-                        ft.Text("Built with Flet & Python", color="#888888", size=12)
+                        ft.Text("ℹ️ About", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+                        ft.Divider(color=colors["border"], height=1),
+                        ft.Text("Local Ollama Agent v1.0", color=colors["text_primary"], size=14),
+                        ft.Text("AI-powered desktop assistant", color=colors["text_secondary"], size=12),
+                        ft.Text("Built with Flet & Python", color=colors["text_secondary"], size=12)
                     ]),
                     padding=ft.padding.all(20),
                     margin=ft.margin.all(10),
-                    bgcolor="#1a1a1a",
+                    bgcolor=colors["bg_secondary"],
                     border_radius=10,
-                    border=ft.border.all(1, "#333333")
-                )
+                    border=ft.border.all(1, colors["border"])
+                ),
+                
+                # Save & Restart Button
+                self.create_save_button(colors)
             ], scroll=ft.ScrollMode.AUTO),
             expand=True,
             padding=ft.padding.all(10),
-            bgcolor="#111111"
+            bgcolor=colors["bg_primary"]
         )
         
         return ft.Column([
@@ -587,28 +599,70 @@ class OllamaAgentGUI:
             settings_content
         ], expand=True, spacing=0)
         
+    def create_save_button(self, colors):
+        """Create the save button and store reference for state control"""
+        # Create button with initial state
+        button_color = colors["accent"] if self.settings_changed else colors["bg_secondary"]
+        text_color = "#ffffff" if self.settings_changed else colors["text_secondary"]
+        
+        self.save_button_widget = ft.ElevatedButton(
+            "Save Changes",
+            icon=ft.Icons.SAVE_OUTLINED,
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=10),
+            ),
+            on_click=self.on_save_settings,
+            bgcolor=button_color,
+            color=text_color,
+            width=200,
+            height=50,
+            disabled=not self.settings_changed,
+        )
+        
+        help_text = "Make changes above to enable save" if not self.settings_changed else "✅ Settings are applied immediately and saved automatically"
+        self.save_button_text = ft.Text(
+            help_text,
+            size=12,
+            italic=True,
+            color=colors["text_secondary"],
+        )
+        
+        self.save_button = ft.Container(
+            content=ft.Column([
+                ft.Container(
+                    content=self.save_button_widget,
+                    alignment=ft.alignment.center
+                ),
+                self.save_button_text
+            ], spacing=10),
+            padding=ft.padding.all(20),
+            margin=ft.margin.all(10)
+        )
+        return self.save_button
+        
     def add_user_message(self, message: str):
         """Add a user message to the chat"""
+        colors = self.settings.get_theme_colors()
         user_msg = ft.Container(
             content=ft.Row([
                 ft.Container(expand=True),
                 ft.Container(
                     content=ft.Column([
                         ft.Row([
-                            ft.Icon(ft.Icons.PERSON, size=16, color="#00d4ff"),
-                            ft.Text("You", size=13, weight=ft.FontWeight.W_600, color="#00d4ff")
+                            ft.Icon(ft.Icons.PERSON, size=16, color=colors["accent"]),
+                            ft.Text("You", size=13, weight=ft.FontWeight.W_600, color=colors["accent"])
                         ], spacing=8),
                         ft.Container(
                             content=ft.Text(
                                 message, 
                                 selectable=True,
                                 size=14,
-                                color="#ffffff"
+                                color=colors["text_primary"]
                             ),
                             margin=ft.margin.only(top=8)
                         )
                     ]),
-                    bgcolor="#1e3a5f",
+                    bgcolor=colors["bg_secondary"],
                     padding=ft.padding.all(16),
                     border_radius=ft.border_radius.only(
                         top_left=20,
@@ -617,7 +671,7 @@ class OllamaAgentGUI:
                         bottom_right=5
                     ),
                     width=500,
-                    border=ft.border.all(1, "#2a4a6b")
+                    border=ft.border.all(1, colors["border"])
                 )
             ]),
             margin=ft.margin.only(bottom=15)
@@ -626,25 +680,26 @@ class OllamaAgentGUI:
         
     def add_agent_message(self, message: str):
         """Add an agent response to the chat"""
+        colors = self.settings.get_theme_colors()
         agent_msg = ft.Container(
             content=ft.Row([
                 ft.Container(
                     content=ft.Column([
                         ft.Row([
-                            ft.Icon(ft.Icons.SMART_TOY, size=16, color="#00ff88"),
-                            ft.Text("Agent", size=13, weight=ft.FontWeight.W_600, color="#00ff88")
+                            ft.Icon(ft.Icons.SMART_TOY, size=16, color=colors["accent"]),
+                            ft.Text("Agent", size=13, weight=ft.FontWeight.W_600, color=colors["accent"])
                         ], spacing=8),
                         ft.Container(
                             content=ft.Text(
                                 message, 
                                 selectable=True,
                                 size=14,
-                                color="#ffffff"
+                                color=colors["text_primary"]
                             ),
                             margin=ft.margin.only(top=8)
                         )
                     ]),
-                    bgcolor="#1a2f1a",
+                    bgcolor=colors["bg_secondary"],
                     padding=ft.padding.all(16),
                     border_radius=ft.border_radius.only(
                         top_left=20,
@@ -653,7 +708,7 @@ class OllamaAgentGUI:
                         bottom_right=20
                     ),
                     width=500,
-                    border=ft.border.all(1, "#2a4a2a")
+                    border=ft.border.all(1, colors["border"])
                 ),
                 ft.Container(expand=True)
             ]),
@@ -663,32 +718,33 @@ class OllamaAgentGUI:
         
     def add_tool_message(self, tool_name: str, result: str):
         """Add a tool execution result to the chat"""
+        colors = self.settings.get_theme_colors()
         tool_msg = ft.Container(
             content=ft.Container(
                 content=ft.Column([
                     ft.Row([
-                        ft.Icon(ft.Icons.BUILD, size=16, color="#ff9500"),
-                        ft.Text(f"Tool: {tool_name}", size=13, weight=ft.FontWeight.W_600, color="#ff9500")
+                        ft.Icon(ft.Icons.BUILD, size=16, color=colors["accent"]),
+                        ft.Text(f"Tool: {tool_name}", size=13, weight=ft.FontWeight.W_600, color=colors["accent"])
                     ], spacing=8),
                     ft.Container(
                         content=ft.Text(
                             result, 
                             selectable=True, 
                             size=13,
-                            color="#e0e0e0",
+                            color=colors["text_primary"],
                             font_family="Consolas"
                         ),
-                        bgcolor="#2a1f0a",
+                        bgcolor=colors["bg_tertiary"],
                         padding=ft.padding.all(12),
                         border_radius=10,
                         margin=ft.margin.only(top=8),
-                        border=ft.border.all(1, "#4a3f2a")
+                        border=ft.border.all(1, colors["border"])
                     )
                 ]),
-                bgcolor="#1f1a0a",
+                bgcolor=colors["bg_secondary"],
                 padding=ft.padding.all(16),
                 border_radius=15,
-                border=ft.border.all(1, "#3f3520"),
+                border=ft.border.all(1, colors["border"]),
                 margin=ft.margin.symmetric(horizontal=50)
             ),
             margin=ft.margin.only(bottom=15)
@@ -697,19 +753,20 @@ class OllamaAgentGUI:
         
     def add_system_message(self, message: str):
         """Add a system message to the chat"""
+        colors = self.settings.get_theme_colors()
         system_msg = ft.Container(
             content=ft.Container(
                 content=ft.Text(
                     message, 
                     size=14, 
-                    color="#b0b0b0", 
+                    color=colors["text_secondary"], 
                     text_align=ft.TextAlign.CENTER,
                     weight=ft.FontWeight.W_400
                 ),
                 padding=ft.padding.all(20),
-                bgcolor="#1a1a1a",
+                bgcolor=colors["bg_secondary"],
                 border_radius=15,
-                border=ft.border.all(1, "#333333"),
+                border=ft.border.all(1, colors["border"]),
                 margin=ft.margin.symmetric(horizontal=40)
             ),
             margin=ft.margin.only(bottom=20)
@@ -756,36 +813,209 @@ class OllamaAgentGUI:
         """Handle theme selection change"""
         new_theme = e.control.value
         self.settings.set("appearance", "theme", new_theme)
-        self.apply_theme()
+        self.settings_changed = True
+        self.update_save_button_visibility()
         
     def on_accent_change(self, e):
         """Handle accent color change"""
         new_accent = e.control.value
         self.settings.set("appearance", "accent_color", new_accent)
-        self.apply_theme()
+        self.settings_changed = True
+        self.update_save_button_visibility()
         
     def on_model_change(self, e):
         """Handle AI model selection change"""
         new_model = e.control.value
         self.settings.set("ai_model", "model", new_model)
-        # Model will be used in next chat message
-        self.add_system_message(f"🤖 AI model changed to: {new_model}")
+        self.settings_changed = True
+        self.update_save_button_visibility()
         
     def apply_theme(self):
-        """Apply the current theme colors to the UI"""
+        """Apply the current theme colors to the UI dynamically"""
         colors = self.settings.get_theme_colors()
-        # For now, just show a message that theme was applied
-        # Full theme application would require rebuilding the UI
         theme_name = self.settings.get("appearance", "theme")
         accent_name = self.settings.get("appearance", "accent_color")
+        
+        # Update page theme
+        if theme_name == "Light":
+            self.page.theme_mode = ft.ThemeMode.LIGHT
+            self.page.bgcolor = colors["bg_primary"]
+        else:
+            self.page.theme_mode = ft.ThemeMode.DARK
+            self.page.bgcolor = colors["bg_primary"]
+        
+        # Update custom theme with accent color
+        self.page.theme = ft.Theme(
+            color_scheme_seed=colors["accent"],
+            use_material3=True
+        )
+        
+        # Apply colors to existing UI components
+        self.apply_colors_to_components(colors)
+        
+        # Update the page
+        self.page.update()
+        
         self.add_system_message(f"🎨 Theme applied: {theme_name} with {accent_name} accent")
+        
+    def apply_colors_to_components(self, colors):
+        """Apply theme colors to existing UI components"""
+        try:
+            # Update header colors
+            if hasattr(self, 'header'):
+                self.header.bgcolor = colors["bg_secondary"]
+                if hasattr(self.header, 'border'):
+                    self.header.border = ft.border.only(bottom=ft.BorderSide(2, colors["border"]))
+                
+            # Update header buttons
+            if hasattr(self, 'settings_button'):
+                self.settings_button.icon_color = colors["text_primary"]
+                self.settings_button.bgcolor = colors["bg_secondary"]
+                self.settings_button.style = ft.ButtonStyle(
+                    shape=ft.CircleBorder(),
+                    overlay_color=colors["border"]
+                )
+                
+            if hasattr(self, 'refresh_button'):
+                self.refresh_button.icon_color = colors["text_primary"]
+                self.refresh_button.bgcolor = colors["bg_secondary"]
+                self.refresh_button.style = ft.ButtonStyle(
+                    shape=ft.CircleBorder(),
+                    overlay_color=colors["border"]
+                )
+                
+            # Update main content container
+            if hasattr(self, 'main_content'):
+                self.main_content.bgcolor = colors["bg_primary"]
+                
+            # Update chat area colors
+            if hasattr(self, 'chat_area'):
+                self.chat_area.bgcolor = colors["bg_primary"]
+                
+            # Update input area colors
+            if hasattr(self, 'input_area'):
+                self.input_area.bgcolor = colors["bg_secondary"]
+                
+            # Update input field colors
+            if hasattr(self, 'input_field'):
+                self.input_field.bgcolor = colors["bg_secondary"]
+                self.input_field.color = colors["text_primary"]
+                self.input_field.border_color = colors["border"]
+                self.input_field.focused_border_color = colors["accent"]
+                
+            # Update send button colors
+            if hasattr(self, 'send_button'):
+                # Find the IconButton inside the container
+                if hasattr(self.send_button, 'content') and hasattr(self.send_button.content, 'bgcolor'):
+                    self.send_button.content.bgcolor = colors["accent"]
+                    
+            # Update status area colors
+            if hasattr(self, 'status_area'):
+                self.status_area.bgcolor = colors["bg_secondary"]
+                
+            # Update status text color
+            if hasattr(self, 'status_text'):
+                self.status_text.color = colors["accent"]
+                
+        except Exception as e:
+            print(f"Error applying colors to components: {e}")
         
     def on_tool_toggle(self, tool_name: str, enabled: bool):
         """Handle tool enable/disable toggle"""
         self.settings.set("tools", tool_name, enabled)
-        status = "enabled" if enabled else "disabled"
-        tool_display_name = tool_name.replace("_", " ").title()
-        self.add_system_message(f"🛠️ {tool_display_name} {status}")
+        self.settings_changed = True
+        self.update_save_button_visibility()
+        
+    def update_save_button_visibility(self):
+        """Update the save button state based on whether settings have changed"""
+        if hasattr(self, 'save_button_widget') and self.save_button_widget:
+            colors = self.settings.get_theme_colors()
+            
+            # Update button state
+            self.save_button_widget.disabled = not self.settings_changed
+            self.save_button_widget.bgcolor = colors["accent"] if self.settings_changed else colors["bg_secondary"]
+            self.save_button_widget.color = "#ffffff" if self.settings_changed else colors["text_secondary"]
+            
+            # Update help text
+            if hasattr(self, 'save_button_text') and self.save_button_text:
+                help_text = "Make changes above to enable save" if not self.settings_changed else "⚠️ Settings require app restart to take effect"
+                self.save_button_text.value = help_text
+                
+            # Update the page if we're on settings
+            if hasattr(self, 'page') and self.current_page == "settings":
+                self.page.update()
+                
+    def on_save_settings(self, e):
+        """Handle save settings button click"""
+        print("Debug: Save settings button clicked!")
+        
+        # Show popup informing user of manual restart requirement
+        self.show_settings_saved_dialog()
+        
+    def show_settings_saved_dialog(self):
+        """Show dialog informing user that settings are saved and require manual restart"""
+        print("Debug: Adding settings saved dialog to overlay")
+        
+        # Get theme colors for consistent styling
+        colors = self.settings.get_theme_colors()
+        
+        # Create semi-transparent background
+        overlay_bg = ft.Container(
+            bgcolor=ft.Colors.BLACK54,
+            width=self.page.width,
+            height=self.page.height,
+            on_click=lambda e: self.dismiss_dialog()
+        )
+        
+        # Create dialog content
+        dialog = ft.Card(
+            width=400,
+            height=200,
+            elevation=10,
+            content=ft.Container(
+                padding=20,
+                content=ft.Column(
+                    [   
+                        ft.Text(
+                            "Settings Saved",
+                            size=20,
+                            weight=ft.FontWeight.BOLD,
+                            color=colors["text_primary"],
+                        ),
+                        ft.Divider(height=1, color=colors["border"]),
+                        ft.Text(
+                            "Your settings have been saved successfully. Changes will take effect the next time you start the application.",
+                            size=14,
+                            color=colors["text_secondary"],
+                        ),
+                        ft.Container(height=20),
+                        ft.Row(
+                            [   
+                                ft.FilledButton(
+                                    "OK",
+                                    on_click=lambda e: self.dismiss_dialog(),
+                                ),
+                            ],
+                            alignment=ft.MainAxisAlignment.END,
+                        ),
+                    ],
+                ),
+            ),
+        )
+        
+        # Center the dialog
+        dialog.left = (self.page.width - dialog.width) / 2
+        dialog.top = (self.page.height - dialog.height) / 2
+        
+        self.page.overlay.clear()
+        self.page.overlay.extend([overlay_bg, dialog])
+        self.page.update()
+        print("Debug: Settings saved dialog added to overlay")
+    
+    def dismiss_dialog(self):
+        """Dismiss the dialog"""
+        self.page.overlay.clear()
+        self.page.update()
         
     def handle_input_key(self, e):
         """Handle input field key events for Enter key behavior"""

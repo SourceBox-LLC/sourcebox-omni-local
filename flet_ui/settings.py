@@ -92,11 +92,11 @@ class SettingsManager:
         elif theme == "Light":
             base_colors = {
                 "bg_primary": "#ffffff",
-                "bg_secondary": "#f5f5f5",
-                "bg_tertiary": "#e0e0e0", 
-                "text_primary": "#000000",
-                "text_secondary": "#666666",
-                "border": "#cccccc"
+                "bg_secondary": "#f8f9fa",
+                "bg_tertiary": "#e9ecef", 
+                "text_primary": "#212529",
+                "text_secondary": "#6c757d",
+                "border": "#dee2e6"
             }
         else:  # Auto - default to dark for now
             base_colors = {
@@ -108,15 +108,27 @@ class SettingsManager:
                 "border": "#333333"
             }
         
-        # Accent colors
-        accent_colors = {
-            "Blue": "#00d4ff",
-            "Green": "#00ff88", 
-            "Purple": "#bb88ff",
-            "Orange": "#ff8844"
-        }
+        # Accent colors - adjusted for better contrast in both themes
+        if theme == "Light":
+            accent_colors = {
+                "Blue": "#0066cc",
+                "Green": "#28a745", 
+                "Purple": "#6f42c1",
+                "Orange": "#fd7e14"
+            }
+        else:
+            accent_colors = {
+                "Blue": "#00d4ff",
+                "Green": "#00ff88", 
+                "Purple": "#bb88ff",
+                "Orange": "#ff8844"
+            }
         
-        base_colors["accent"] = accent_colors.get(accent, "#00d4ff")
+        # Set accent color with proper fallback for theme
+        if theme == "Light":
+            base_colors["accent"] = accent_colors.get(accent, "#0066cc")
+        else:
+            base_colors["accent"] = accent_colors.get(accent, "#00d4ff")
         return base_colors
     
     def _deep_update(self, base_dict: Dict, update_dict: Dict):
