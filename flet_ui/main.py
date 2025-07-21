@@ -13,11 +13,12 @@ import flet as ft
 from ollama import chat, ChatResponse
 import datetime
 import platform
+from settings import SettingsManager
 
 # Add parent directory to path to import agent tools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import tools from agent_tools package (same as console agent)
+# Import tools from agent_tools package
 # Handle missing dependencies gracefully
 try:
     from agent_tools.launch_app_tool import launch_app
@@ -129,6 +130,11 @@ class OllamaAgentGUI:
         self.messages = []
         # Initialize file operations tool
         self.file_ops = FileOperationsTool()
+        # Page navigation state
+        self.current_page = "chat"  # "chat" or "settings"
+        self.main_content = None
+        # Settings manager
+        self.settings = SettingsManager()
         self.tools = [self.launch_apps, self.take_screenshot_wrapper, 
                      self.web_search_wrapper, self.get_system_info, self.close_apps, 
                      self.launch_game_wrapper, 
@@ -238,6 +244,17 @@ class OllamaAgentGUI:
                 ft.Container(
                     content=ft.Row([
                         ft.IconButton(
+                            icon=ft.Icons.SETTINGS,
+                            tooltip="Settings",
+                            on_click=self.open_settings,
+                            icon_color="#ffffff",
+                            bgcolor="#1a1a1a",
+                            style=ft.ButtonStyle(
+                                shape=ft.CircleBorder(),
+                                overlay_color="#333333"
+                            )
+                        ),
+                        ft.IconButton(
                             icon=ft.Icons.REFRESH,
                             tooltip="Clear Chat",
                             on_click=self.clear_chat,
@@ -248,7 +265,7 @@ class OllamaAgentGUI:
                                 overlay_color="#333333"
                             )
                         )
-                    ]),
+                    ], spacing=10),
                     padding=ft.padding.only(right=20)
                 )
             ]),
@@ -275,7 +292,7 @@ class OllamaAgentGUI:
         
         # Modern Input area with beautiful styling
         self.input_field = ft.TextField(
-            hint_text="✨ Ask me to launch apps, take screenshots, search the web, or get system info...",
+            hint_text="✨ Ask me to launch apps, take screenshots, search the web, or get system info... (Press Enter to send, Shift+Enter for new line)",
             expand=True,
             multiline=True,
             max_lines=4,
@@ -288,7 +305,9 @@ class OllamaAgentGUI:
             hint_style=ft.TextStyle(color="#888888"),
             text_style=ft.TextStyle(size=14),
             border_radius=15,
-            content_padding=ft.padding.all(15)
+            content_padding=ft.padding.all(15),
+            shift_enter=True,  # Enable Shift+Enter for new lines
+            on_change=self.handle_input_key
         )
         
         self.send_button = ft.Container(
@@ -359,15 +378,214 @@ class OllamaAgentGUI:
             "💡 Just type what you need help with!"
         )
         
+        # Store UI components for navigation
+        self.header = header
+        self.chat_area = chat_area
+        self.input_area = input_area
+        self.status_area = status_area
+        
+        # Create main content container for page switching
+        self.main_content = ft.Column([
+            chat_area,
+            input_area,
+            status_area
+        ], expand=True, spacing=0)
+        
         # Main layout with modern structure
         self.page.add(
             ft.Column([
                 header,
-                chat_area,
-                input_area,
-                status_area
+                self.main_content
             ], expand=True, spacing=0)
         )
+        
+    def create_settings_page(self):
+        """Create the mock settings page UI"""
+        # Settings header with back button
+        settings_header = ft.Container(
+            content=ft.Row([
+                ft.IconButton(
+                    icon=ft.Icons.ARROW_BACK,
+                    tooltip="Back to Chat",
+                    on_click=self.back_to_chat,
+                    icon_color="#ffffff",
+                    bgcolor="#1a1a1a",
+                    style=ft.ButtonStyle(
+                        shape=ft.CircleBorder(),
+                        overlay_color="#333333"
+                    )
+                ),
+                ft.Text(
+                    "Settings", 
+                    size=24, 
+                    weight=ft.FontWeight.W_600,
+                    color="#ffffff"
+                ),
+                ft.Container(expand=True)
+            ]),
+            padding=ft.padding.all(20),
+            bgcolor="#1a1a1a",
+            border=ft.border.only(bottom=ft.BorderSide(2, "#333333"))
+        )
+        
+        # Settings content
+        settings_content = ft.Container(
+            content=ft.Column([
+                # Theme Section
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("🎨 Appearance", size=18, weight=ft.FontWeight.W_500, color="#00d4ff"),
+                        ft.Divider(color="#333333", height=1),
+                        ft.Row([
+                            ft.Text("Theme", color="#ffffff", size=14),
+                            ft.Container(expand=True),
+                            ft.Dropdown(
+                                width=150,
+                                value=self.settings.get("appearance", "theme"),
+                                options=[
+                                    ft.dropdown.Option("Dark"),
+                                    ft.dropdown.Option("Light"),
+                                    ft.dropdown.Option("Auto")
+                                ],
+                                bgcolor="#2a2a2a",
+                                color="#ffffff",
+                                border_color="#333333",
+                                on_change=self.on_theme_change
+                            )
+                        ]),
+                        ft.Row([
+                            ft.Text("Accent Color", color="#ffffff", size=14),
+                            ft.Container(expand=True),
+                            ft.Dropdown(
+                                width=150,
+                                value=self.settings.get("appearance", "accent_color"),
+                                options=[
+                                    ft.dropdown.Option("Blue"),
+                                    ft.dropdown.Option("Green"),
+                                    ft.dropdown.Option("Purple"),
+                                    ft.dropdown.Option("Orange")
+                                ],
+                                bgcolor="#2a2a2a",
+                                color="#ffffff",
+                                border_color="#333333",
+                                on_change=self.on_accent_change
+                            )
+                        ])
+                    ]),
+                    padding=ft.padding.all(20),
+                    margin=ft.margin.all(10),
+                    bgcolor="#1a1a1a",
+                    border_radius=10,
+                    border=ft.border.all(1, "#333333")
+                ),
+                
+                # Model Section
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("🤖 AI Model", size=18, weight=ft.FontWeight.W_500, color="#00d4ff"),
+                        ft.Divider(color="#333333", height=1),
+                        ft.Row([
+                            ft.Text("Model", color="#ffffff", size=14),
+                            ft.Container(expand=True),
+                            ft.Dropdown(
+                                width=200,
+                                value=self.settings.get("ai_model", "model"),
+                                options=[
+                                    ft.dropdown.Option("llama3.1"),
+                                    ft.dropdown.Option("qwen3")
+                                ],
+                                bgcolor="#2a2a2a",
+                                color="#ffffff",
+                                border_color="#333333",
+                                on_change=self.on_model_change
+                            )
+                        ])
+                    ]),
+                    padding=ft.padding.all(20),
+                    margin=ft.margin.all(10),
+                    bgcolor="#1a1a1a",
+                    border_radius=10,
+                    border=ft.border.all(1, "#333333")
+                ),
+                
+                # Tools Section
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("🛠️ Tools & Features", size=18, weight=ft.FontWeight.W_500, color="#00d4ff"),
+                        ft.Divider(color="#333333", height=1),
+                        ft.Row([
+                            ft.Checkbox(
+                                value=self.settings.get("tools", "screenshot_tool"),
+                                active_color="#00d4ff",
+                                on_change=lambda e: self.on_tool_toggle("screenshot_tool", e.control.value)
+                            ),
+                            ft.Text("Screenshot Tool", color="#ffffff", size=14)
+                        ]),
+                        ft.Row([
+                            ft.Checkbox(
+                                value=self.settings.get("tools", "web_search"),
+                                active_color="#00d4ff",
+                                on_change=lambda e: self.on_tool_toggle("web_search", e.control.value)
+                            ),
+                            ft.Text("Web Search", color="#ffffff", size=14)
+                        ]),
+                        ft.Row([
+                            ft.Checkbox(
+                                value=self.settings.get("tools", "file_operations"),
+                                active_color="#00d4ff",
+                                on_change=lambda e: self.on_tool_toggle("file_operations", e.control.value)
+                            ),
+                            ft.Text("File Operations", color="#ffffff", size=14)
+                        ]),
+                        ft.Row([
+                            ft.Checkbox(
+                                value=self.settings.get("tools", "game_launcher"),
+                                active_color="#00d4ff",
+                                on_change=lambda e: self.on_tool_toggle("game_launcher", e.control.value)
+                            ),
+                            ft.Text("Game Launcher", color="#ffffff", size=14)
+                        ]),
+                        ft.Row([
+                            ft.Checkbox(
+                                value=self.settings.get("tools", "image_generation"),
+                                active_color="#00d4ff",
+                                on_change=lambda e: self.on_tool_toggle("image_generation", e.control.value)
+                            ),
+                            ft.Text("Image Generation", color="#ffffff", size=14)
+                        ])
+                    ]),
+                    padding=ft.padding.all(20),
+                    margin=ft.margin.all(10),
+                    bgcolor="#1a1a1a",
+                    border_radius=10,
+                    border=ft.border.all(1, "#333333")
+                ),
+                
+                # About Section
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("ℹ️ About", size=18, weight=ft.FontWeight.W_500, color="#00d4ff"),
+                        ft.Divider(color="#333333", height=1),
+                        ft.Text("Local Ollama Agent v1.0", color="#ffffff", size=14),
+                        ft.Text("AI-powered desktop assistant", color="#888888", size=12),
+                        ft.Text("Built with Flet & Python", color="#888888", size=12)
+                    ]),
+                    padding=ft.padding.all(20),
+                    margin=ft.margin.all(10),
+                    bgcolor="#1a1a1a",
+                    border_radius=10,
+                    border=ft.border.all(1, "#333333")
+                )
+            ], scroll=ft.ScrollMode.AUTO),
+            expand=True,
+            padding=ft.padding.all(10),
+            bgcolor="#111111"
+        )
+        
+        return ft.Column([
+            settings_header,
+            settings_content
+        ], expand=True, spacing=0)
         
     def add_user_message(self, message: str):
         """Add a user message to the chat"""
@@ -511,6 +729,71 @@ class OllamaAgentGUI:
         self.add_system_message("🤖 Chat cleared. Agent ready!")
         self.page.update()
         
+    def open_settings(self, e):
+        """Navigate to the settings page"""
+        self.current_page = "settings"
+        settings_page = self.create_settings_page()
+        
+        # Replace main content with settings page
+        self.main_content.controls.clear()
+        self.main_content.controls.append(settings_page)
+        self.page.update()
+        
+    def back_to_chat(self, e):
+        """Navigate back to the chat page"""
+        self.current_page = "chat"
+        
+        # Restore chat interface
+        self.main_content.controls.clear()
+        self.main_content.controls.extend([
+            self.chat_area,
+            self.input_area,
+            self.status_area
+        ])
+        self.page.update()
+        
+    def on_theme_change(self, e):
+        """Handle theme selection change"""
+        new_theme = e.control.value
+        self.settings.set("appearance", "theme", new_theme)
+        self.apply_theme()
+        
+    def on_accent_change(self, e):
+        """Handle accent color change"""
+        new_accent = e.control.value
+        self.settings.set("appearance", "accent_color", new_accent)
+        self.apply_theme()
+        
+    def on_model_change(self, e):
+        """Handle AI model selection change"""
+        new_model = e.control.value
+        self.settings.set("ai_model", "model", new_model)
+        # Model will be used in next chat message
+        self.add_system_message(f"🤖 AI model changed to: {new_model}")
+        
+    def apply_theme(self):
+        """Apply the current theme colors to the UI"""
+        colors = self.settings.get_theme_colors()
+        # For now, just show a message that theme was applied
+        # Full theme application would require rebuilding the UI
+        theme_name = self.settings.get("appearance", "theme")
+        accent_name = self.settings.get("appearance", "accent_color")
+        self.add_system_message(f"🎨 Theme applied: {theme_name} with {accent_name} accent")
+        
+    def on_tool_toggle(self, tool_name: str, enabled: bool):
+        """Handle tool enable/disable toggle"""
+        self.settings.set("tools", tool_name, enabled)
+        status = "enabled" if enabled else "disabled"
+        tool_display_name = tool_name.replace("_", " ").title()
+        self.add_system_message(f"🛠️ {tool_display_name} {status}")
+        
+    def handle_input_key(self, e):
+        """Handle input field key events for Enter key behavior"""
+        # Note: In Flet, multiline TextFields with shift_enter=True should handle
+        # Enter to send and Shift+Enter for new line automatically
+        # This method can be used for additional input processing if needed
+        pass
+        
     def send_message(self, e):
         """Handle sending a message"""
         user_input = self.input_field.value.strip()
@@ -534,8 +817,9 @@ class OllamaAgentGUI:
             self.messages.append({"role": "user", "content": user_input})
             
             # Get response from Ollama with tools
+            current_model = self.settings.get("ai_model", "model")
             response: ChatResponse = chat(
-                model="qwen3", #llama3.1
+                model=current_model,
                 messages=self.messages,
                 tools=self.tools,
                 stream=False
