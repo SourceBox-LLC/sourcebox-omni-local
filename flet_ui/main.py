@@ -797,26 +797,74 @@ class OllamaAgentGUI:
         self.chat_container.controls.append(user_msg)
         
     def add_agent_message(self, message: str):
-        """Add an agent response to the chat"""
+        """Add an agent response to the chat with markdown rendering"""
         colors = self.settings.get_theme_colors()
+        
+        # Check if the message contains thinking sections
+        if '<think>' in message and '</think>' in message:
+            # Split message into parts and handle thinking sections
+            message_parts = self._process_thinking_sections(message)
+            content_column = [
+                ft.Row([
+                    ft.Icon(ft.Icons.SMART_TOY, size=16, color=colors["accent"]),
+                    ft.Text("Agent", size=13, weight=ft.FontWeight.W_600, color=colors["accent"])
+                ], spacing=8)
+            ]
+            
+            # Add each part (thinking sections and regular content)
+            for part in message_parts:
+                if part['is_thinking']:
+                    # Yellow thinking section
+                    content_column.append(
+                        ft.Container(
+                            content=ft.Text(
+                                part['content'],
+                                size=13,
+                                color="#ffcc00",  # Yellow color for thinking
+                                italic=True,
+                                selectable=True
+                            ),
+                            margin=ft.margin.only(top=8),
+                            padding=ft.padding.all(8),
+                            bgcolor=colors["bg_tertiary"],
+                            border_radius=8,
+                            border=ft.border.all(1, "#ffcc00")
+                        )
+                    )
+                else:
+                    # Regular markdown content
+                    if part['content'].strip():  # Only add non-empty content
+                        content_column.append(
+                            ft.Container(
+                                content=ft.Markdown(
+                                    part['content'],
+                                    selectable=True,
+                                    extension_set=ft.MarkdownExtensionSet.GITHUB_WEB
+                                ),
+                                margin=ft.margin.only(top=8)
+                            )
+                        )
+        else:
+            # No thinking sections, use regular markdown
+            content_column = [
+                ft.Row([
+                    ft.Icon(ft.Icons.SMART_TOY, size=16, color=colors["accent"]),
+                    ft.Text("Agent", size=13, weight=ft.FontWeight.W_600, color=colors["accent"])
+                ], spacing=8),
+                ft.Container(
+                    content=ft.Markdown(
+                        message,
+                        selectable=True,
+                        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB
+                    ),
+                    margin=ft.margin.only(top=8)
+                )
+            ]
+        
         agent_msg = ft.Container(
             content=ft.Row([
                 ft.Container(
-                    content=ft.Column([
-                        ft.Row([
-                            ft.Icon(ft.Icons.SMART_TOY, size=16, color=colors["accent"]),
-                            ft.Text("Agent", size=13, weight=ft.FontWeight.W_600, color=colors["accent"])
-                        ], spacing=8),
-                        ft.Container(
-                            content=ft.Text(
-                                message, 
-                                selectable=True,
-                                size=14,
-                                color=colors["text_primary"]
-                            ),
-                            margin=ft.margin.only(top=8)
-                        )
-                    ]),
+                    content=ft.Column(content_column),
                     bgcolor=colors["bg_secondary"],
                     padding=ft.padding.all(16),
                     border_radius=ft.border_radius.only(
@@ -833,6 +881,48 @@ class OllamaAgentGUI:
             margin=ft.margin.only(bottom=15)
         )
         self.chat_container.controls.append(agent_msg)
+    
+    def _process_thinking_sections(self, message: str):
+        """Process message to separate thinking sections from regular content"""
+        import re
+        
+        parts = []
+        current_pos = 0
+        
+        # Find all <think>...</think> sections
+        think_pattern = r'<think>(.*?)</think>'
+        matches = list(re.finditer(think_pattern, message, re.DOTALL))
+        
+        for match in matches:
+            # Add content before thinking section
+            if match.start() > current_pos:
+                before_content = message[current_pos:match.start()].strip()
+                if before_content:
+                    parts.append({
+                        'content': before_content,
+                        'is_thinking': False
+                    })
+            
+            # Add thinking section
+            thinking_content = match.group(1).strip()
+            if thinking_content:
+                parts.append({
+                    'content': f"💭 {thinking_content}",  # Add thinking emoji
+                    'is_thinking': True
+                })
+            
+            current_pos = match.end()
+        
+        # Add remaining content after last thinking section
+        if current_pos < len(message):
+            remaining_content = message[current_pos:].strip()
+            if remaining_content:
+                parts.append({
+                    'content': remaining_content,
+                    'is_thinking': False
+                })
+        
+        return parts
         
     def add_tool_message(self, tool_name: str, result: str):
         """Add a tool execution result to the chat"""
