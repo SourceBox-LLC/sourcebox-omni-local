@@ -28,7 +28,8 @@ class SettingsManager:
                 "web_search": True,
                 "file_operations": True,
                 "game_launcher": True,
-                "image_generation": True
+                "image_generation": True,
+                "timer_tool": True
             }
         }
         

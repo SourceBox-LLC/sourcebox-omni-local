@@ -143,6 +143,14 @@ except ImportError as e:
         return "Unknown"
     DOCUMENT_LOADER_AVAILABLE = False
 
+try:
+    from agent_tools.timer_tool import set_timer
+    TIMER_TOOL_AVAILABLE = True
+except ImportError as e:
+    def set_timer(duration_text):
+        return {"success": False, "message": f"Timer tool unavailable - {str(e)}"}
+    TIMER_TOOL_AVAILABLE = False
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
@@ -180,7 +188,9 @@ class OllamaAgentGUI:
                      self.extract_webpage_content,
                      # Close app by name tools
                      self.close_app_by_name_wrapper,
-                     self.list_processes_wrapper]
+                     self.list_processes_wrapper,
+                     # Timer tool
+                     self.set_timer_wrapper]
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -229,7 +239,8 @@ class OllamaAgentGUI:
             "16. set_wallpaper_wrapper(image_path): Set Windows desktop wallpaper to the specified image file\n" +
             "17. extract_webpage_content(url): Extract and return the full content of a webpage for analysis\n" +
             "18. close_app_by_name_wrapper(app_name, force_kill=False): Close applications by partial process name match with detailed results\n" +
-            "19. list_processes_wrapper(): List all running processes on the system\n\n" +
+            "19. list_processes_wrapper(): List all running processes on the system\n" +
+            "20. set_timer_wrapper(duration): Set a timer using natural language (e.g., '5 minutes', '30 seconds', '1 hour')\n\n" +
 
             "IMPORTANT NOTE: the launch_apps tool and launch_game_wrapper tool are different.\n" +
             "the launch_app tool is for applications (steam, discord, spotify, etc) while the launch_game_wrapper tool is used ONLY for launching games.\n" +
@@ -249,7 +260,7 @@ class OllamaAgentGUI:
 
         )
         self.messages = [{"role": "system", "content": system_msg}]
-        
+       
     def create_ui(self):
         """Create the main UI components"""
         # File picker for file uploads
@@ -1546,6 +1557,31 @@ class OllamaAgentGUI:
         except Exception as e:
             return f"Error listing processes: {str(e)}"
 
+    def set_timer_wrapper(self, duration: str) -> str:
+        """Set a timer for the specified duration using natural language.
+        
+        Args:
+            duration: Natural language duration (e.g., "5 minutes", "30 seconds", "1 hour")
+            
+        Returns:
+            str: Success message or error message
+        """
+        if not TIMER_TOOL_AVAILABLE:
+            return "Timer tool is not available. Please check dependencies."
+            
+        try:
+            result = set_timer(duration)
+            # Extract message from the result dictionary
+            if isinstance(result, dict):
+                if result.get('success', False):
+                    return result.get('message', 'Timer set successfully')
+                else:
+                    return result.get('message', 'Failed to set timer')
+            else:
+                return str(result)
+        except Exception as e:
+            return f"Error setting timer: {str(e)}"
+
     def is_tool_enabled(self, tool_name):
         """Check if a specific tool is enabled in settings"""
         # Map tool function names to their setting keys
@@ -1570,6 +1606,7 @@ class OllamaAgentGUI:
             "generate_image_wrapper": "image_generation",
             "set_wallpaper_wrapper": "image_generation", # Wallpaper uses image generation setting
             "extract_webpage_content": "web_search",  # Web extraction uses web_search setting
+            "set_timer_wrapper": "timer_tool",  # Timer tool
         }
         
         # Default to disabled for tools without specific settings (security first)
