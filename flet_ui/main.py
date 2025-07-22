@@ -314,6 +314,23 @@ class OllamaAgentGUI:
             on_change=self.handle_input_key
         )
         
+        # File attachment button (placeholder for future functionality)
+        self.attach_button = ft.Container(
+            content=ft.IconButton(
+                icon=ft.Icons.ATTACH_FILE_ROUNDED,
+                on_click=lambda e: None,  # Placeholder - no functionality yet
+                icon_color="#888888",
+                bgcolor="#2a2a2a",
+                style=ft.ButtonStyle(
+                    shape=ft.CircleBorder(),
+                    overlay_color="#444444"
+                ),
+                tooltip="File attachment (coming soon)"
+            ),
+            width=45,
+            height=45
+        )
+        
         self.send_button = ft.Container(
             content=ft.IconButton(
                 icon=ft.Icons.SEND_ROUNDED,
@@ -332,8 +349,9 @@ class OllamaAgentGUI:
         input_area = ft.Container(
             content=ft.Row([
                 self.input_field,
+                self.attach_button,
                 self.send_button
-            ], spacing=15),
+            ], spacing=10),
             padding=ft.padding.all(20),
             bgcolor="#1a1a1a",
             border=ft.border.only(top=ft.BorderSide(2, "#333333")),
@@ -903,6 +921,12 @@ class OllamaAgentGUI:
                 self.input_field.border_color = colors["border"]
                 self.input_field.focused_border_color = colors["accent"]
                 
+            # Update attach button colors
+            if hasattr(self, 'attach_button'):
+                if hasattr(self.attach_button, 'content'):
+                    self.attach_button.content.icon_color = colors["text_secondary"]
+                    self.attach_button.content.bgcolor = colors["bg_tertiary"]
+                    
             # Update send button colors
             if hasattr(self, 'send_button'):
                 # Find the IconButton inside the container
