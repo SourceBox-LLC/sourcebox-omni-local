@@ -149,6 +149,8 @@ class OllamaAgentGUI:
         # File upload functionality
         self.temp_dir = None
         self.uploaded_files = []
+        # Load any previously uploaded files
+        self.load_file_queue_state()
         self.tools = [self.launch_apps, self.take_screenshot_wrapper, 
                      self.web_search_wrapper, self.get_system_info, self.close_apps, 
                      self.launch_game_wrapper, 
@@ -362,23 +364,25 @@ class OllamaAgentGUI:
         )
         
         # File queue display - persistent inline display when files are attached
+        # Get colors for file queue styling
+        queue_colors = self.settings.get_theme_colors()
         self.file_queue_row = ft.Container(
             content=ft.Row([
                 ft.Icon(
                     ft.Icons.ATTACH_FILE,
                     size=16,
-                    color=colors["accent"]
+                    color=queue_colors["accent"]
                 ),
                 ft.Text(
                     "Files ready to send:",
                     size=12,
-                    color=colors["text_secondary"]
+                    color=queue_colors["text_secondary"]
                 ),
                 # File chips will be added here dynamically
             ], spacing=8, scroll=ft.ScrollMode.AUTO),
             padding=ft.padding.symmetric(horizontal=20, vertical=8),
-            bgcolor=colors["bg_secondary"],
-            border=ft.border.only(top=ft.BorderSide(1, colors["border"])),
+            bgcolor=queue_colors["bg_secondary"],
+            border=ft.border.only(top=ft.BorderSide(1, queue_colors["border"])),
             visible=False  # Initially hidden
         )
         
@@ -859,9 +863,14 @@ class OllamaAgentGUI:
         self.main_content.controls.clear()
         self.main_content.controls.extend([
             self.chat_area,
+            self.file_queue_row,  # Add file queue display back
             self.input_area,
             self.status_area
         ])
+        
+        # Restore file queue display if files are uploaded
+        self.restore_file_queue_on_navigation()
+        
         self.page.update()
         
     def on_theme_change(self, e):
@@ -1550,8 +1559,9 @@ class OllamaAgentGUI:
                     f"📎 Uploaded {uploaded_count} file(s) successfully!\n" +
                     f"📊 Total files: {len(self.uploaded_files)} ({total_mb:.2f} MB)"
                 )
-                # Update the UI display
+                # Update the UI display and save state
                 self.update_uploaded_files_display()
+                self.save_file_queue_state()
                 
     def open_file_picker(self, e):
         """Open file picker for file upload"""
@@ -1679,8 +1689,9 @@ class OllamaAgentGUI:
             # Remove from uploaded files list
             self.uploaded_files = [f for f in self.uploaded_files if f['path'] != file_info['path']]
             
-            # Update the display
+            # Update the display and save state
             self.update_uploaded_files_display()
+            self.save_file_queue_state()
             
             # Show confirmation message
             self.add_system_message(f"🗑️ Removed file: {file_info['name']}")
@@ -1693,6 +1704,81 @@ class OllamaAgentGUI:
         """Clear all uploaded files (called from UI button)"""
         if self.uploaded_files:
             self.clear_uploaded_files()
+            self.update_uploaded_files_display()
+            self.save_file_queue_state()
+            
+    def save_file_queue_state(self):
+        """Save the current file queue state to settings for persistence"""
+        try:
+            # Save uploaded files info and temp directory path
+            file_queue_data = {
+                'temp_dir': str(self.temp_dir) if self.temp_dir else None,
+                'uploaded_files': self.uploaded_files.copy()
+            }
+            
+            # Save to settings under a special key
+            self.settings.set('file_queue', 'data', file_queue_data)
+            print(f"✅ Saved file queue state: {len(self.uploaded_files)} files")
+            
+        except Exception as ex:
+            print(f"❌ Error saving file queue state: {ex}")
+            
+    def load_file_queue_state(self):
+        """Load the file queue state from settings to restore persistence"""
+        try:
+            # Load file queue data from settings
+            file_queue_data = self.settings.get('file_queue', 'data')
+            
+            if file_queue_data and isinstance(file_queue_data, dict):
+                # Restore temp directory path
+                if file_queue_data.get('temp_dir'):
+                    temp_dir_path = Path(file_queue_data['temp_dir'])
+                    if temp_dir_path.exists():
+                        self.temp_dir = temp_dir_path
+                        print(f"✅ Restored temp directory: {self.temp_dir}")
+                    else:
+                        print(f"⚠️ Temp directory no longer exists: {temp_dir_path}")
+                        # Clear the saved state since temp dir is gone
+                        self.settings.set('file_queue', 'data', {})
+                        return
+                        
+                # Restore uploaded files list, but verify files still exist
+                uploaded_files = file_queue_data.get('uploaded_files', [])
+                valid_files = []
+                
+                for file_info in uploaded_files:
+                    if isinstance(file_info, dict) and 'path' in file_info:
+                        if os.path.exists(file_info['path']):
+                            valid_files.append(file_info)
+                        else:
+                            print(f"⚠️ File no longer exists: {file_info.get('name', 'unknown')}")
+                            
+                self.uploaded_files = valid_files
+                
+                if valid_files:
+                    print(f"✅ Restored {len(valid_files)} uploaded files")
+                    # Update display after UI is created
+                    if hasattr(self, 'page'):
+                        self.page.run_task(self.delayed_file_queue_update)
+                else:
+                    # No valid files, clear the saved state
+                    self.settings.set('file_queue', 'data', {})
+                    
+        except Exception as ex:
+            print(f"❌ Error loading file queue state: {ex}")
+            # Clear invalid state
+            self.settings.set('file_queue', 'data', {})
+            
+    async def delayed_file_queue_update(self):
+        """Update file queue display after a short delay to ensure UI is ready"""
+        import asyncio
+        await asyncio.sleep(0.1)  # Small delay to ensure UI is fully initialized
+        self.update_uploaded_files_display()
+        
+    def restore_file_queue_on_navigation(self):
+        """Restore file queue display when navigating back to chat"""
+        if self.uploaded_files:
+            print(f"✅ Restoring file queue display with {len(self.uploaded_files)} files")
             self.update_uploaded_files_display()
 
 
