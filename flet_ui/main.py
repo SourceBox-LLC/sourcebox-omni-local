@@ -839,7 +839,8 @@ class OllamaAgentGUI:
                                 content=ft.Markdown(
                                     part['content'],
                                     selectable=True,
-                                    extension_set=ft.MarkdownExtensionSet.GITHUB_WEB
+                                    extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                                    on_tap_link=self._on_link_tap
                                 ),
                                 margin=ft.margin.only(top=8)
                             )
@@ -855,7 +856,8 @@ class OllamaAgentGUI:
                     content=ft.Markdown(
                         message,
                         selectable=True,
-                        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB
+                        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                        on_tap_link=self._on_link_tap
                     ),
                     margin=ft.margin.only(top=8)
                 )
@@ -923,6 +925,14 @@ class OllamaAgentGUI:
                 })
         
         return parts
+    
+    def _on_link_tap(self, e):
+        """Handle link clicks in markdown content"""
+        import webbrowser
+        try:
+            webbrowser.open(e.data)
+        except Exception as ex:
+            print(f"Error opening link: {ex}")
         
     def add_tool_message(self, tool_name: str, result: str):
         """Add a tool execution result to the chat"""
