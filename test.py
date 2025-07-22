@@ -1,194 +1,236 @@
 #!/usr/bin/env python3
 """
-File Upload Prototype for Local Ollama Agent
-Simple console test to prototype file upload to temporary directory functionality
+Universal Document Loader Test Script
+Tests loading various document formats using LangChain UnstructuredLoader
+
+Supported formats:
+- PDF files (.pdf)
+- Word documents (.docx, .doc)
+- Text files (.txt)
+- JSON files (.json)
+- CSV files (.csv)
+- Excel files (.xlsx, .xls)
 """
 
 import os
-import shutil
+import sys
 from pathlib import Path
-import tempfile
+from typing import List, Dict, Any
 
-class FileUploadTest:
+# LangChain imports
+try:
+    from langchain_unstructured import UnstructuredLoader
+    UNSTRUCTURED_AVAILABLE = True
+except ImportError:
+    print("⚠️ langchain_unstructured not available, trying alternative imports...")
+    try:
+        from langchain_community.document_loaders import UnstructuredFileLoader as UnstructuredLoader
+        UNSTRUCTURED_AVAILABLE = True
+    except ImportError:
+        print("❌ UnstructuredLoader not available. Install with: pip install langchain-unstructured")
+        UNSTRUCTURED_AVAILABLE = False
+
+class DocumentLoader:
     def __init__(self):
-        self.temp_dir = None
-        self.uploaded_files = []
+        self.supported_extensions = {
+            '.pdf': 'PDF Document',
+            '.docx': 'Word Document (DOCX)',
+            '.doc': 'Word Document (DOC)',
+            '.txt': 'Text File',
+            '.json': 'JSON File',
+            '.csv': 'CSV File',
+            '.xlsx': 'Excel File (XLSX)',
+            '.xls': 'Excel File (XLS)'
+        }
         
-    def create_temp_directory(self) -> str:
-        """Create a temporary directory for file uploads"""
-        if self.temp_dir is None:
-            # Create a temp directory in the system temp folder
-            self.temp_dir = Path(tempfile.mkdtemp(prefix="ollama_agent_uploads_"))
-            print(f"✅ Created temporary directory: {self.temp_dir}")
-        return str(self.temp_dir)
+    def is_supported_file(self, file_path: str) -> bool:
+        """Check if file format is supported"""
+        file_ext = Path(file_path).suffix.lower()
+        return file_ext in self.supported_extensions
         
-    def upload_file(self, file_path: str) -> bool:
-        """Upload a file to the temporary directory"""
-        try:
-            source_path = Path(file_path)
-            
-            # Check if source file exists
-            if not source_path.exists():
-                print(f"❌ File not found: {file_path}")
-                return False
-                
-            # Ensure temp directory exists
-            temp_dir = self.create_temp_directory()
-            
-            # Copy file to temp directory
-            dest_path = Path(temp_dir) / source_path.name
-            shutil.copy2(source_path, dest_path)
-            
-            # Get file info
-            file_size = dest_path.stat().st_size
-            file_info = {
-                'name': source_path.name,
-                'size': file_size,
-                'path': str(dest_path),
-                'original_path': str(source_path)
+    def get_file_type(self, file_path: str) -> str:
+        """Get human-readable file type"""
+        file_ext = Path(file_path).suffix.lower()
+        return self.supported_extensions.get(file_ext, 'Unknown')
+        
+    def load_document(self, file_path: str) -> Dict[str, Any]:
+        """Load document content using UnstructuredLoader"""
+        if not UNSTRUCTURED_AVAILABLE:
+            return {
+                'success': False,
+                'error': 'UnstructuredLoader not available. Install langchain-unstructured.',
+                'content': None,
+                'metadata': None
             }
             
-            self.uploaded_files.append(file_info)
+        try:
+            # Validate file exists
+            if not os.path.exists(file_path):
+                return {
+                    'success': False,
+                    'error': f'File not found: {file_path}',
+                    'content': None,
+                    'metadata': None
+                }
+                
+            # Check if file format is supported
+            if not self.is_supported_file(file_path):
+                return {
+                    'success': False,
+                    'error': f'Unsupported file format: {Path(file_path).suffix}',
+                    'content': None,
+                    'metadata': None
+                }
+                
+            print(f"📄 Loading {self.get_file_type(file_path)}: {Path(file_path).name}")
             
-            print(f"✅ Uploaded: {source_path.name} ({file_size} bytes) -> {dest_path}")
-            return True
+            # Load document using UnstructuredLoader
+            loader = UnstructuredLoader(file_path)
+            documents = loader.load()
+            
+            if not documents:
+                return {
+                    'success': False,
+                    'error': 'No content extracted from document',
+                    'content': None,
+                    'metadata': None
+                }
+                
+            # Extract content and metadata from first document
+            doc = documents[0]
+            content = doc.page_content
+            metadata = doc.metadata
+            
+            # Add file information to metadata
+            file_path_obj = Path(file_path)
+            metadata.update({
+                'file_name': file_path_obj.name,
+                'file_size': file_path_obj.stat().st_size,
+                'file_type': self.get_file_type(file_path),
+                'file_extension': file_path_obj.suffix.lower()
+            })
+            
+            return {
+                'success': True,
+                'error': None,
+                'content': content,
+                'metadata': metadata,
+                'document_count': len(documents)
+            }
             
         except Exception as ex:
-            print(f"❌ Error uploading {file_path}: {ex}")
-            return False
+            return {
+                'success': False,
+                'error': f'Error loading document: {str(ex)}',
+                'content': None,
+                'metadata': None
+            }
             
-    def list_uploaded_files(self):
-        """List all uploaded files"""
-        if not self.uploaded_files:
-            print("📁 No files uploaded yet")
+    def load_multiple_documents(self, file_paths: List[str]) -> List[Dict[str, Any]]:
+        """Load multiple documents"""
+        results = []
+        for file_path in file_paths:
+            result = self.load_document(file_path)
+            results.append(result)
+        return results
+        
+    def print_document_summary(self, result: Dict[str, Any]):
+        """Print a summary of loaded document"""
+        if not result['success']:
+            print(f"❌ Error: {result['error']}")
             return
             
-        print(f"\n📁 Uploaded Files ({len(self.uploaded_files)} total):")
-        print("-" * 60)
+        content = result['content']
+        metadata = result['metadata']
         
-        total_size = 0
-        for i, file_info in enumerate(self.uploaded_files, 1):
-            size_mb = file_info['size'] / (1024 * 1024)
-            total_size += file_info['size']
-            print(f"{i:2d}. {file_info['name']}")
-            print(f"    Size: {size_mb:.2f} MB")
-            print(f"    Path: {file_info['path']}")
-            print()
-            
-        total_mb = total_size / (1024 * 1024)
-        print(f"📊 Total size: {total_mb:.2f} MB")
-        if self.temp_dir:
-            print(f"📂 Temp directory: {self.temp_dir}")
-            
-    def remove_file(self, file_name: str) -> bool:
-        """Remove a file from temp directory"""
-        try:
-            # Find the file
-            file_info = None
-            for f in self.uploaded_files:
-                if f['name'] == file_name:
-                    file_info = f
-                    break
-                    
-            if not file_info:
-                print(f"❌ File not found: {file_name}")
-                return False
-                
-            # Remove from filesystem
-            if os.path.exists(file_info['path']):
-                os.remove(file_info['path'])
-                print(f"✅ Removed file: {file_name}")
-                
-            # Remove from uploaded files list
-            self.uploaded_files = [f for f in self.uploaded_files if f['name'] != file_name]
-            return True
-            
-        except Exception as ex:
-            print(f"❌ Error removing file: {ex}")
-            return False
-            
-    def clear_all_files(self):
-        """Clear all uploaded files and cleanup temp directory"""
-        try:
-            # Remove all files from temp directory
-            for file_info in self.uploaded_files:
-                if os.path.exists(file_info['path']):
-                    os.remove(file_info['path'])
-                    
-            # Clear the list
-            self.uploaded_files.clear()
-            
-            # Remove temp directory if empty
-            if self.temp_dir and self.temp_dir.exists():
-                try:
-                    self.temp_dir.rmdir()  # Only removes if empty
-                    print(f"✅ Removed temporary directory: {self.temp_dir}")
-                    self.temp_dir = None
-                except OSError:
-                    print("⚠️ Temporary directory not empty, keeping it")
-                    
-            print("✅ All files cleared")
-            
-        except Exception as ex:
-            print(f"❌ Error clearing files: {ex}")
-            
-    def get_temp_directory(self) -> str:
-        """Get the current temp directory path"""
-        return str(self.temp_dir) if self.temp_dir else "No temp directory created yet"
+        print(f"✅ Successfully loaded: {metadata.get('file_name', 'Unknown')}")
+        print(f"📊 File Type: {metadata.get('file_type', 'Unknown')}")
+        print(f"📏 File Size: {metadata.get('file_size', 0):,} bytes")
+        print(f"📝 Content Length: {len(content):,} characters")
+        
+        # Show first 200 characters of content
+        preview = content[:200] + "..." if len(content) > 200 else content
+        print(f"\n📖 Content Preview:")
+        print("-" * 40)
+        print(preview)
+        print("-" * 40)
+        
+        # Show metadata
+        print(f"\n🏷️ Metadata:")
+        for key, value in metadata.items():
+            if key not in ['file_name', 'file_type', 'file_size']:  # Skip already shown
+                print(f"  {key}: {value}")
+        print()
 
-def test_file_upload():
-    """Test the file upload functionality"""
-    print("🧪 File Upload Test - Console Version")
+def test_document_loader():
+    """Interactive test for document loading"""
+    print("📚 Universal Document Loader Test")
     print("=" * 50)
     
-    uploader = FileUploadTest()
+    if not UNSTRUCTURED_AVAILABLE:
+        print("❌ UnstructuredLoader not available.")
+        print("Install with: pip install langchain-unstructured")
+        return
+        
+    loader = DocumentLoader()
+    
+    print(f"\n🎯 Supported file formats:")
+    for ext, desc in loader.supported_extensions.items():
+        print(f"  {ext} - {desc}")
     
     while True:
         print("\n📋 Options:")
-        print("1. Upload a file")
-        print("2. List uploaded files")
-        print("3. Remove a file")
-        print("4. Clear all files")
-        print("5. Show temp directory")
-        print("6. Exit")
+        print("1. Load a single document")
+        print("2. Load multiple documents")
+        print("3. List supported formats")
+        print("4. Exit")
         
-        choice = input("\nEnter your choice (1-6): ").strip()
+        choice = input("\nEnter your choice (1-4): ").strip()
         
         if choice == '1':
-            file_path = input("Enter file path to upload: ").strip().strip('"')
+            file_path = input("Enter file path: ").strip().strip('"')
             if file_path:
-                uploader.upload_file(file_path)
+                print(f"\n🔄 Processing: {file_path}")
+                result = loader.load_document(file_path)
+                loader.print_document_summary(result)
             else:
                 print("❌ No file path provided")
                 
         elif choice == '2':
-            uploader.list_uploaded_files()
-            
+            print("Enter file paths (one per line, empty line to finish):")
+            file_paths = []
+            while True:
+                path = input("File path: ").strip().strip('"')
+                if not path:
+                    break
+                file_paths.append(path)
+                
+            if file_paths:
+                print(f"\n🔄 Processing {len(file_paths)} files...")
+                results = loader.load_multiple_documents(file_paths)
+                
+                success_count = 0
+                for i, result in enumerate(results, 1):
+                    print(f"\n📄 Document {i}:")
+                    loader.print_document_summary(result)
+                    if result['success']:
+                        success_count += 1
+                        
+                print(f"\n📊 Summary: {success_count}/{len(file_paths)} documents loaded successfully")
+            else:
+                print("❌ No file paths provided")
+                
         elif choice == '3':
-            uploader.list_uploaded_files()
-            if uploader.uploaded_files:
-                file_name = input("Enter filename to remove: ").strip()
-                if file_name:
-                    uploader.remove_file(file_name)
-                else:
-                    print("❌ No filename provided")
-                    
+            print(f"\n🎯 Supported file formats:")
+            for ext, desc in loader.supported_extensions.items():
+                print(f"  {ext} - {desc}")
+                
         elif choice == '4':
-            uploader.clear_all_files()
-            
-        elif choice == '5':
-            print(f"📂 Current temp directory: {uploader.get_temp_directory()}")
-            
-        elif choice == '6':
-            print("\n🧹 Cleaning up...")
-            uploader.clear_all_files()
-            print("👋 Goodbye!")
+            print("\n👋 Goodbye!")
             break
             
         else:
-            print("❌ Invalid choice. Please enter 1-6.")
-
-
+            print("❌ Invalid choice. Please enter 1-4.")
 
 if __name__ == "__main__":
-    test_file_upload()
+    test_document_loader()

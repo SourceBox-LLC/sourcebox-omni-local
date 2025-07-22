@@ -131,6 +131,18 @@ except ImportError as e:
         return f"Error: Process listing tool unavailable - {str(e)}"
     CLOSE_APP_BY_NAME_AVAILABLE = False
 
+try:
+    from agent_tools.document_loader_tool import load_document_content, is_supported_document, get_document_type
+    DOCUMENT_LOADER_AVAILABLE = True
+except ImportError as e:
+    def load_document_content(file_path):
+        return {"success": False, "error": f"Document loader unavailable - {str(e)}", "content": None}
+    def is_supported_document(file_path):
+        return False
+    def get_document_type(file_path):
+        return "Unknown"
+    DOCUMENT_LOADER_AVAILABLE = False
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
@@ -987,6 +999,18 @@ class OllamaAgentGUI:
             if hasattr(self, 'status_text'):
                 self.status_text.color = colors["accent"]
                 
+            # Update file queue row colors
+            if hasattr(self, 'file_queue_row'):
+                self.file_queue_row.bgcolor = colors["bg_secondary"]
+                if hasattr(self.file_queue_row, 'border'):
+                    self.file_queue_row.border = ft.border.only(top=ft.BorderSide(1, colors["border"]))
+                
+                # Update file chips inside queue row
+                if hasattr(self.file_queue_row, 'content') and self.file_queue_row.content is not None:
+                    # Update queue header text color
+                    if len(self.file_queue_row.content.controls) > 1 and hasattr(self.file_queue_row.content.controls[1], 'color'):
+                        self.file_queue_row.content.controls[1].color = colors["text_secondary"]
+                
         except Exception as e:
             print(f"Error applying colors to components: {e}")
         
@@ -1031,7 +1055,7 @@ class OllamaAgentGUI:
         
         # Create semi-transparent background
         overlay_bg = ft.Container(
-            bgcolor=ft.Colors.BLACK54,
+            bgcolor=ft.colors.BLACK54,
             width=self.page.width,
             height=self.page.height,
             on_click=lambda e: self.dismiss_dialog()
@@ -1113,8 +1137,42 @@ class OllamaAgentGUI:
         try:
             self.update_status("✨ Thinking...", "#ff9500")
             
+            # Prepare the message content with file attachments if any
+            message_content = user_input
+            
+            # Include uploaded file contents if any
+            if self.uploaded_files:
+                file_contents = []
+                for file_info in self.uploaded_files:
+                    if file_info.get('content'):
+                        file_contents.append(
+                            f"\n--- FILE: {file_info['name']} ({file_info['document_type']}) ---\n" +
+                            file_info['content'] +
+                            f"\n--- END OF FILE: {file_info['name']} ---\n"
+                        )
+                    elif file_info.get('is_document') and file_info.get('processing_error'):
+                        file_contents.append(
+                            f"\n--- FILE: {file_info['name']} (Processing Error) ---\n" +
+                            f"Error: {file_info['processing_error']}\n" +
+                            f"--- END OF FILE: {file_info['name']} ---\n"
+                        )
+                
+                if file_contents:
+                    message_content = (
+                        f"User message: {user_input}\n\n" +
+                        f"Attached files ({len(file_contents)} document(s)):\n" +
+                        "".join(file_contents)
+                    )
+                    
+                    # Show user that files are being processed
+                    processed_count = sum(1 for f in self.uploaded_files if f.get('content'))
+                    if processed_count > 0:
+                        self.add_system_message(
+                            f"📄 Including {processed_count} processed document(s) in your message to the agent"
+                        )
+            
             # Add user message to conversation history
-            self.messages.append({"role": "user", "content": user_input})
+            self.messages.append({"role": "user", "content": message_content})
             
             # Debug: Show current tool settings
             print("\n=== CURRENT TOOL SETTINGS ===")
@@ -1180,7 +1238,7 @@ class OllamaAgentGUI:
             if response.message.tool_calls:
                 self.update_status("💭 Generating response...", ft.Colors.BLUE_400)
                 final: ChatResponse = chat(
-                    model="qwen3", #llama3.1
+                    model=current_model,
                     messages=self.messages
                 )
                 final_response = final.message.content
@@ -1190,6 +1248,16 @@ class OllamaAgentGUI:
             # Add agent response to chat
             self.add_agent_message(final_response)
             self.messages.append({"role": "assistant", "content": final_response})
+            
+            # Auto-clear file queue after successful message processing
+            if self.uploaded_files:
+                files_cleared = len(self.uploaded_files)
+                self.clear_uploaded_files()
+                self.update_uploaded_files_display()
+                self.save_file_queue_state()
+                self.add_system_message(
+                    f"🧹 Cleared {files_cleared} file(s) from queue after successful processing"
+                )
             
             self.update_status("🟢 Ready", "#00ff88")
             
@@ -1536,12 +1604,28 @@ class OllamaAgentGUI:
                     # Copy the file
                     shutil.copy2(source_path, dest_path)
                     
-                    # Add to uploaded files list
+                    # Process document content if it's a supported format
+                    content_result = None
+                    if DOCUMENT_LOADER_AVAILABLE and is_supported_document(str(dest_path)):
+                        print(f"📄 Processing {get_document_type(str(dest_path))}: {file.name}")
+                        content_result = load_document_content(str(dest_path))
+                        
+                        if content_result['success']:
+                            print(f"✅ Extracted {len(content_result['content']):,} characters from {file.name}")
+                        else:
+                            print(f"⚠️ Could not extract content from {file.name}: {content_result['error']}")
+                    
+                    # Add to uploaded files list with content
                     file_info = {
                         'name': file.name,
                         'size': file.size,
                         'path': str(dest_path),
-                        'original_path': source_path
+                        'original_path': source_path,
+                        'content': content_result['content'] if content_result and content_result['success'] else None,
+                        'content_preview': content_result['content_preview'] if content_result and content_result['success'] else None,
+                        'document_type': get_document_type(str(dest_path)) if DOCUMENT_LOADER_AVAILABLE else 'Unknown',
+                        'is_document': is_supported_document(str(dest_path)) if DOCUMENT_LOADER_AVAILABLE else False,
+                        'processing_error': content_result['error'] if content_result and not content_result['success'] else None
                     }
                     self.uploaded_files.append(file_info)
                     uploaded_count += 1
@@ -1555,10 +1639,17 @@ class OllamaAgentGUI:
             if uploaded_count > 0:
                 total_size = sum(f['size'] for f in self.uploaded_files)
                 total_mb = total_size / (1024 * 1024)
-                self.add_system_message(
-                    f"📎 Uploaded {uploaded_count} file(s) successfully!\n" +
-                    f"📊 Total files: {len(self.uploaded_files)} ({total_mb:.2f} MB)"
-                )
+                
+                # Count processed documents
+                processed_docs = sum(1 for f in self.uploaded_files if f.get('content') is not None)
+                
+                message = f"📎 Uploaded {uploaded_count} file(s) successfully!\n" + \
+                         f"📊 Total files: {len(self.uploaded_files)} ({total_mb:.2f} MB)"
+                
+                if processed_docs > 0:
+                    message += f"\n📄 Processed {processed_docs} document(s) for content extraction"
+                    
+                self.add_system_message(message)
                 # Update the UI display and save state
                 self.update_uploaded_files_display()
                 self.save_file_queue_state()
@@ -1616,37 +1707,98 @@ class OllamaAgentGUI:
             for file_info in self.uploaded_files:
                 file_size_mb = file_info['size'] / (1024 * 1024)
                 
+                # Determine file icon based on document type
+                icon_color = colors["text_primary"]
+                tooltip_text = f"{file_info['name']} ({file_size_mb:.1f}MB)"
+                
+                # Determine file icon and color based on document status
+                if file_info.get('is_document', False):
+                    # Choose icon based on document type
+                    if 'pdf' in file_info.get('document_type', '').lower():
+                        file_icon = ft.Icons.PICTURE_AS_PDF
+                    elif 'word' in file_info.get('document_type', '').lower():
+                        file_icon = ft.Icons.DESCRIPTION
+                    elif 'text' in file_info.get('document_type', '').lower():
+                        file_icon = ft.Icons.TEXT_SNIPPET
+                    elif 'excel' in file_info.get('document_type', '').lower() or 'csv' in file_info.get('document_type', '').lower():
+                        file_icon = ft.Icons.TABLE_CHART
+                    else:
+                        file_icon = ft.Icons.DOCUMENT_SCANNER
+                    
+                    # Determine status indicator
+                    if file_info.get('content') is not None:
+                        # Successfully extracted content
+                        status_icon = ft.Icons.CHECK_CIRCLE
+                        status_color = "#4CAF50"  # Green
+                        chars_count = len(file_info.get('content', ''))
+                        tooltip_text += f"\n✅ {file_info['document_type']}: {chars_count:,} characters extracted"
+                        if file_info.get('content_preview'):
+                            tooltip_text += f"\n\nPreview: {file_info['content_preview']}"
+                    elif file_info.get('processing_error'):
+                        # Processing error
+                        status_icon = ft.Icons.ERROR
+                        status_color = "#F44336"  # Red
+                        tooltip_text += f"\n❌ Error: {file_info['processing_error']}"
+                    else:
+                        # Unknown state
+                        status_icon = ft.Icons.HELP
+                        status_color = "#FFC107"  # Amber
+                        tooltip_text += "\n⚠️ Document not processed"
+                else:
+                    # Not a supported document
+                    file_icon = ft.Icons.INSERT_DRIVE_FILE
+                    status_icon = None
+                    status_color = None
+                
+                # Create row content with icon, text, and optional status indicator
+                row_content = [
+                    ft.Icon(
+                        file_icon,
+                        size=14,
+                        color=icon_color
+                    ),
+                    ft.Text(
+                        f"{file_info['name']} ({file_size_mb:.1f}MB)",
+                        size=11,
+                        color=colors["text_primary"],
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS
+                    )
+                ]
+                
+                # Add status indicator if applicable
+                if status_icon:
+                    row_content.append(
+                        ft.Icon(
+                            status_icon,
+                            size=12,
+                            color=status_color
+                        )
+                    )
+                
+                # Add close button
+                row_content.append(
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE,
+                        icon_size=12,
+                        icon_color=colors["text_secondary"],
+                        tooltip=f"Remove {file_info['name']}",
+                        on_click=lambda e, f=file_info: self.remove_uploaded_file(f),
+                        style=ft.ButtonStyle(
+                            padding=ft.padding.all(2)
+                        )
+                    )
+                )
+                
                 # Create compact file chip
                 file_chip = ft.Container(
-                    content=ft.Row([
-                        ft.Icon(
-                            ft.Icons.INSERT_DRIVE_FILE,
-                            size=12,
-                            color=colors["text_primary"]
-                        ),
-                        ft.Text(
-                            f"{file_info['name']} ({file_size_mb:.1f}MB)",
-                            size=11,
-                            color=colors["text_primary"],
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.CLOSE,
-                            icon_size=12,
-                            icon_color=colors["text_secondary"],
-                            tooltip=f"Remove {file_info['name']}",
-                            on_click=lambda e, f=file_info: self.remove_uploaded_file(f),
-                            style=ft.ButtonStyle(
-                                padding=ft.padding.all(2)
-                            )
-                        )
-                    ], spacing=4, tight=True),
+                    content=ft.Row(row_content, spacing=4, tight=True),
                     padding=ft.padding.symmetric(horizontal=8, vertical=4),
                     bgcolor=colors["bg_tertiary"],
                     border=ft.border.all(1, colors["border"]),
                     border_radius=15,
-                    margin=ft.margin.only(right=6)
+                    margin=ft.margin.only(right=6),
+                    tooltip=tooltip_text
                 )
                 
                 file_row.controls.append(file_chip)
