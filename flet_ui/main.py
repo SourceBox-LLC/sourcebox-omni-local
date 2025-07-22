@@ -1046,12 +1046,20 @@ class OllamaAgentGUI:
             # Add user message to conversation history
             self.messages.append({"role": "user", "content": user_input})
             
+            # Debug: Show current tool settings
+            print("\n=== CURRENT TOOL SETTINGS ===")
+            tools_settings = self.settings.get("tools")
+            print(f"Tools settings from file: {tools_settings}")
+            
+            # Get available tools based on settings
+            available_tools = self.get_enabled_tools()
+            
             # Get response from Ollama with tools
             current_model = self.settings.get("ai_model", "model")
             response: ChatResponse = chat(
                 model=current_model,
                 messages=self.messages,
-                tools=self.tools,
+                tools=available_tools,  # Only pass enabled tools
                 stream=False
             )
             
@@ -1062,8 +1070,19 @@ class OllamaAgentGUI:
                 
                 self.update_status(f"⚙️ Executing: {fn_name}...", "#00d4ff")
                 
+                # Check if the tool is enabled before executing
+                if not self.is_tool_enabled(fn_name):
+                    error_msg = f"This tool is disabled in settings: '{fn_name}'"
+                    self.add_tool_message(fn_name, error_msg)
+                    self.messages.append({
+                        "role": "tool",
+                        "name": fn_name,
+                        "content": error_msg
+                    })
+                    continue
+                
                 # Execute the tool
-                tool_functions = [tool.__name__ for tool in self.tools]
+                tool_functions = [tool.__name__ for tool in available_tools]
                 if fn_name in tool_functions:
                     try:
                         result = getattr(self, fn_name)(**args)
@@ -1361,15 +1380,66 @@ class OllamaAgentGUI:
         except Exception as e:
             return f"Error closing application: {str(e)}"
 
-    def list_processes_wrapper(self) -> str:
+    def list_processes_wrapper(self):
         """List all running processes"""
-        if not CLOSE_APP_BY_NAME_AVAILABLE:
-            return "Process listing tool is not available. Please check dependencies."
         try:
-            result = list_processes()
-            return result
+            if CLOSE_APP_BY_NAME_AVAILABLE:
+                return list_processes()
+            else:
+                return "Process listing tool is not available. Required dependencies may be missing."
         except Exception as e:
             return f"Error listing processes: {str(e)}"
+
+    def is_tool_enabled(self, tool_name):
+        """Check if a specific tool is enabled in settings"""
+        # Map tool function names to their setting keys
+        tool_to_setting = {
+            "take_screenshot_wrapper": "screenshot_tool",
+            "web_search_wrapper": "web_search",
+            "launch_apps": "file_operations",  # App launcher uses file_operations setting
+            "get_system_info": "file_operations",  # System info uses file_operations setting
+            "close_apps": "file_operations",  # Close apps uses file_operations setting
+            "close_app_by_name_wrapper": "file_operations",  # Close app by name uses file_operations setting
+            "list_processes_wrapper": "file_operations",  # List processes uses file_operations setting
+            # File operations tools all use the file_operations setting
+            "list_directory": "file_operations",
+            "copy_file": "file_operations",
+            "move_file": "file_operations",
+            "delete_file": "file_operations",
+            "rename_file": "file_operations",
+            "create_directory": "file_operations",
+            "create_file": "file_operations",
+            "open_in_editor": "file_operations",  # Editor tool uses file_operations setting
+            "launch_game_wrapper": "game_launcher",
+            "generate_image_wrapper": "image_generation",
+            "set_wallpaper_wrapper": "image_generation", # Wallpaper uses image generation setting
+            "extract_webpage_content": "web_search",  # Web extraction uses web_search setting
+        }
+        
+        # Default to disabled for tools without specific settings (security first)
+        if tool_name not in tool_to_setting:
+            print(f"Warning: Tool '{tool_name}' not mapped to any setting, defaulting to disabled")
+            return False
+            
+        setting_key = tool_to_setting[tool_name]
+        tool_enabled = self.settings.get("tools", setting_key)
+        print(f"Debug: Tool '{tool_name}' -> setting '{setting_key}' = {tool_enabled}")
+        return tool_enabled
+        
+    def get_enabled_tools(self):
+        """Return a list of enabled tools based on settings"""
+        enabled_tools = []
+        print(f"Debug: Checking {len(self.tools)} total tools...")
+        for tool in self.tools:
+            tool_name = tool.__name__
+            if self.is_tool_enabled(tool_name):
+                enabled_tools.append(tool)
+                print(f"Debug: Tool '{tool_name}' is ENABLED")
+            else:
+                print(f"Debug: Tool '{tool_name}' is DISABLED")
+                
+        print(f"Debug: {len(enabled_tools)} tools enabled out of {len(self.tools)} total")
+        return enabled_tools
 
 
 def main(page: ft.Page):
