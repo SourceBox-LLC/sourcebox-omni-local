@@ -360,6 +360,23 @@ class OllamaAgentGUI:
             height=45
         )
         
+        # Microphone button (placeholder for future audio-to-text functionality)
+        self.mic_button = ft.Container(
+            content=ft.IconButton(
+                icon=ft.Icons.MIC_ROUNDED,
+                on_click=lambda e: None,  # Placeholder, no functionality yet
+                icon_color="#888888",
+                bgcolor="#2a2a2a",
+                style=ft.ButtonStyle(
+                    shape=ft.CircleBorder(),
+                    overlay_color="#444444"
+                ),
+                tooltip="Voice input (coming soon)"
+            ),
+            width=45,
+            height=45
+        )
+        
         self.send_button = ft.Container(
             content=ft.IconButton(
                 icon=ft.Icons.SEND_ROUNDED,
@@ -402,6 +419,7 @@ class OllamaAgentGUI:
             content=ft.Row([
                 self.input_field,
                 self.attach_button,
+                self.mic_button,
                 self.send_button
             ], spacing=10),
             padding=ft.padding.all(20),
