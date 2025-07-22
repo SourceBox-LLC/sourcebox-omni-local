@@ -688,6 +688,9 @@ class OllamaAgentGUI:
                     border=ft.border.all(1, colors["border"])
                 ),
                 
+                # Ollama Connection & Model Check Section
+                self.create_ollama_status_section(colors),
+                
                 # About Section
                 ft.Container(
                     content=ft.Column([
@@ -757,6 +760,152 @@ class OllamaAgentGUI:
             margin=ft.margin.all(10)
         )
         return self.save_button
+    
+    def create_ollama_status_section(self, colors):
+        """Create the Ollama connection and model availability check section"""
+        # Check Ollama status
+        ollama_status = self._check_ollama_status()
+        
+        # Create status indicators
+        server_status_color = "#00ff88" if ollama_status['server_running'] else "#ff4444"
+        server_status_icon = "✅" if ollama_status['server_running'] else "❌"
+        server_status_text = "Connected" if ollama_status['server_running'] else "Not Connected"
+        
+        # Model availability indicators
+        qwen_status_color = "#00ff88" if ollama_status['has_qwen3'] else "#ff4444"
+        qwen_status_icon = "✅" if ollama_status['has_qwen3'] else "❌"
+        
+        llama_status_color = "#00ff88" if ollama_status['has_llama31'] else "#ff4444"
+        llama_status_icon = "✅" if ollama_status['has_llama31'] else "❌"
+        
+        # Create refresh button for re-checking status
+        refresh_button = ft.IconButton(
+            icon=ft.Icons.REFRESH,
+            tooltip="Refresh Ollama Status",
+            on_click=self.refresh_ollama_status,
+            icon_color=colors["accent"],
+            bgcolor=colors["bg_tertiary"],
+            style=ft.ButtonStyle(
+                shape=ft.CircleBorder(),
+                overlay_color=colors["border"]
+            )
+        )
+        
+        # Build the content
+        content_items = [
+            ft.Row([
+                ft.Text("🔌 Ollama Connection & Models", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+                ft.Container(expand=True),
+                refresh_button
+            ]),
+            ft.Divider(color=colors["border"], height=1),
+            
+            # Server status
+            ft.Row([
+                ft.Text(f"{server_status_icon} Ollama Server", color=colors["text_primary"], size=14),
+                ft.Container(expand=True),
+                ft.Text(server_status_text, color=server_status_color, size=14, weight=ft.FontWeight.W_500)
+            ]),
+            
+            # Model availability
+            ft.Row([
+                ft.Text(f"{qwen_status_icon} Qwen3 Model", color=colors["text_primary"], size=14),
+                ft.Container(expand=True),
+                ft.Text("Available" if ollama_status['has_qwen3'] else "Not Found", 
+                       color=qwen_status_color, size=14, weight=ft.FontWeight.W_500)
+            ]),
+            
+            ft.Row([
+                ft.Text(f"{llama_status_icon} Llama3.1 Model", color=colors["text_primary"], size=14),
+                ft.Container(expand=True),
+                ft.Text("Available" if ollama_status['has_llama31'] else "Not Found", 
+                       color=llama_status_color, size=14, weight=ft.FontWeight.W_500)
+            ])
+        ]
+        
+        # Add error message if there's an issue
+        if ollama_status['error']:
+            content_items.append(
+                ft.Container(
+                    content=ft.Text(
+                        f"⚠️ {ollama_status['error']}",
+                        color="#ffaa00",
+                        size=12,
+                        italic=True
+                    ),
+                    padding=ft.padding.only(top=10),
+                    bgcolor=colors["bg_tertiary"],
+                    border_radius=5,
+                    padding_all=10,
+                    margin=ft.margin.only(top=10)
+                )
+            )
+        
+        # Add recommendations if models are missing
+        if not ollama_status['has_qwen3'] and not ollama_status['has_llama31']:
+            content_items.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text(
+                            "💡 No supported models found!",
+                            color="#ffaa00",
+                            size=13,
+                            weight=ft.FontWeight.W_500
+                        ),
+                        ft.Text(
+                            "Install a supported model:\n• ollama pull llama3.1\n• ollama pull qwen2.5",
+                            color=colors["text_secondary"],
+                            size=12
+                        )
+                    ], spacing=5),
+                    padding=ft.padding.all(10),
+                    bgcolor=colors["bg_tertiary"],
+                    border_radius=5,
+                    margin=ft.margin.only(top=10)
+                )
+            )
+        
+        # Show available models if server is running
+        if ollama_status['server_running'] and ollama_status['available_models']:
+            models_text = "\n".join([f"• {model}" for model in ollama_status['available_models'][:5]])  # Show first 5
+            if len(ollama_status['available_models']) > 5:
+                models_text += f"\n... and {len(ollama_status['available_models']) - 5} more"
+            
+            content_items.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text(
+                            f"📋 Available Models ({len(ollama_status['available_models'])}):",
+                            color=colors["text_primary"],
+                            size=12,
+                            weight=ft.FontWeight.W_500
+                        ),
+                        ft.Text(
+                            models_text,
+                            color=colors["text_secondary"],
+                            size=11
+                        )
+                    ], spacing=5),
+                    padding=ft.padding.all(10),
+                    bgcolor=colors["bg_tertiary"],
+                    border_radius=5,
+                    margin=ft.margin.only(top=10)
+                )
+            )
+        
+        return ft.Container(
+            content=ft.Column(content_items),
+            padding=ft.padding.all(20),
+            margin=ft.margin.all(10),
+            bgcolor=colors["bg_secondary"],
+            border_radius=10,
+            border=ft.border.all(1, colors["border"])
+        )
+    
+    def refresh_ollama_status(self, e):
+        """Refresh the Ollama status and update the settings page"""
+        # Navigate back to settings to refresh the status
+        self.open_settings(e)
         
     def add_user_message(self, message: str):
         """Add a user message to the chat"""
@@ -933,6 +1082,54 @@ class OllamaAgentGUI:
             webbrowser.open(e.data)
         except Exception as ex:
             print(f"Error opening link: {ex}")
+    
+    def _check_ollama_status(self):
+        """Check Ollama server connection and available models"""
+        import requests
+        import json
+        
+        try:
+            # Check if Ollama server is running
+            response = requests.get("http://localhost:11434/api/tags", timeout=5)
+            if response.status_code == 200:
+                models_data = response.json()
+                available_models = [model['name'] for model in models_data.get('models', [])]
+                
+                # Check for required models (qwen3 and llama3.1)
+                has_qwen3 = any('qwen' in model.lower() for model in available_models)
+                has_llama31 = any('llama3.1' in model.lower() or 'llama3:latest' in model.lower() for model in available_models)
+                
+                return {
+                    'server_running': True,
+                    'available_models': available_models,
+                    'has_qwen3': has_qwen3,
+                    'has_llama31': has_llama31,
+                    'error': None
+                }
+            else:
+                return {
+                    'server_running': False,
+                    'available_models': [],
+                    'has_qwen3': False,
+                    'has_llama31': False,
+                    'error': f"Server responded with status {response.status_code}"
+                }
+        except requests.exceptions.ConnectionError:
+            return {
+                'server_running': False,
+                'available_models': [],
+                'has_qwen3': False,
+                'has_llama31': False,
+                'error': "Cannot connect to Ollama server. Make sure Ollama is installed and running."
+            }
+        except Exception as e:
+            return {
+                'server_running': False,
+                'available_models': [],
+                'has_qwen3': False,
+                'has_llama31': False,
+                'error': f"Error checking Ollama: {str(e)}"
+            }
         
     def add_tool_message(self, tool_name: str, result: str):
         """Add a tool execution result to the chat"""
