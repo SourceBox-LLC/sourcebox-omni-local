@@ -151,6 +151,13 @@ except ImportError as e:
         return {"success": False, "message": f"Timer tool unavailable - {str(e)}"}
     TIMER_TOOL_AVAILABLE = False
 
+# Audio transcription with Whisper
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
@@ -171,6 +178,11 @@ class OllamaAgentGUI:
         self.uploaded_files = []
         # Load any previously uploaded files
         self.load_file_queue_state()
+        
+        # Audio recording functionality
+        self.audio_recorder = None
+        self.is_recording = False
+        self.current_recording_path = None
         self.tools = [self.launch_apps, self.take_screenshot_wrapper, 
                      self.web_search_wrapper, self.get_system_info, self.close_apps, 
                      self.launch_game_wrapper, 
@@ -268,6 +280,12 @@ class OllamaAgentGUI:
             on_result=self.handle_file_picker_result
         )
         self.page.overlay.append(self.file_picker)
+        
+        # Audio recorder for voice input
+        self.audio_recorder = ft.AudioRecorder(
+            on_state_changed=self.on_audio_state_changed
+        )
+        self.page.overlay.append(self.audio_recorder)
         colors = self.settings.get_theme_colors()
         
         # Create header with dynamic styling
@@ -371,18 +389,18 @@ class OllamaAgentGUI:
             height=45
         )
         
-        # Microphone button (placeholder for future audio-to-text functionality)
+        # Microphone button for audio recording
         self.mic_button = ft.Container(
             content=ft.IconButton(
                 icon=ft.Icons.MIC_ROUNDED,
-                on_click=lambda e: None,  # Placeholder, no functionality yet
+                on_click=self.toggle_recording,
                 icon_color="#888888",
                 bgcolor="#2a2a2a",
                 style=ft.ButtonStyle(
                     shape=ft.CircleBorder(),
                     overlay_color="#444444"
                 ),
-                tooltip="Voice input (coming soon)"
+                tooltip="Record voice message"
             ),
             width=45,
             height=45
@@ -1984,10 +2002,122 @@ class OllamaAgentGUI:
         
     def restore_file_queue_on_navigation(self):
         """Restore file queue display when navigating back to chat"""
-        if self.uploaded_files:
-            print(f"✅ Restoring file queue display with {len(self.uploaded_files)} files")
-            self.update_uploaded_files_display()
-
+        if self.current_page == "chat" and self.uploaded_files:
+            self.delayed_file_queue_update()
+    
+    def on_audio_state_changed(self, e):
+        """Handle audio recorder state changes"""
+        if e.data == "recording":
+            self.is_recording = True
+            # Update mic button to show recording state
+            self.mic_button.content.icon = ft.Icons.STOP_ROUNDED
+            self.mic_button.content.icon_color = "#ff4444"
+            self.mic_button.content.bgcolor = "#4a2a2a"
+            self.mic_button.content.tooltip = "Stop recording"
+            self.update_status("🔴 Recording audio...", "#ff4444")
+        elif e.data == "stopped":
+            self.is_recording = False
+            # Reset mic button to normal state
+            self.mic_button.content.icon = ft.Icons.MIC_ROUNDED
+            self.mic_button.content.icon_color = "#888888"
+            self.mic_button.content.bgcolor = "#2a2a2a"
+            self.mic_button.content.tooltip = "Record voice message"
+            if self.current_recording_path:
+                self.update_status(f"✅ Audio recorded, transcribing...", "#00d4ff")
+                # Start transcription in a separate thread
+                threading.Thread(target=self.transcribe_and_update_input, daemon=True).start()
+            else:
+                self.update_status("🟢 Ready", "#00ff88")
+        self.page.update()
+    
+    def toggle_recording(self, e):
+        """Toggle audio recording on/off"""
+        if not self.is_recording:
+            # Start recording
+            self.start_audio_recording()
+        else:
+            # Stop recording
+            self.stop_audio_recording()
+    
+    def start_audio_recording(self):
+        """Start audio recording and save to temp folder"""
+        try:
+            # Create temp directory if it doesn't exist
+            if not self.temp_dir:
+                self.create_temp_directory()
+            
+            # Generate unique filename for recording
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.current_recording_path = os.path.join(self.temp_dir, f"voice_recording_{timestamp}.wav")
+            
+            # Start recording with output path
+            self.audio_recorder.start_recording(output_path=self.current_recording_path)
+            
+        except Exception as e:
+            self.update_status(f"❌ Error starting recording: {str(e)}", "#ff4444")
+            self.page.update()
+    
+    def stop_audio_recording(self):
+        """Stop audio recording"""
+        try:
+            self.audio_recorder.stop_recording()
+        except Exception as e:
+            self.update_status(f"❌ Error stopping recording: {str(e)}", "#ff4444")
+            self.is_recording = False
+            # Reset mic button state
+            self.mic_button.content.icon = ft.Icons.MIC_ROUNDED
+            self.mic_button.content.icon_color = "#888888"
+            self.mic_button.content.bgcolor = "#2a2a2a"
+            self.mic_button.content.tooltip = "Record voice message"
+            self.page.update()
+    
+    def transcribe_and_update_input(self):
+        """Transcribe the recorded audio and update the input field"""
+        if not self.current_recording_path or not WHISPER_AVAILABLE:
+            if not WHISPER_AVAILABLE:
+                self.update_status("❌ Whisper not available for transcription", "#ff4444")
+            else:
+                self.update_status("❌ No recording to transcribe", "#ff4444")
+            return
+        
+        try:
+            # Check if the recording file exists
+            if not os.path.exists(self.current_recording_path):
+                self.update_status("❌ Recording file not found", "#ff4444")
+                return
+            
+            # Load Whisper model (base model for good balance of speed/accuracy)
+            self.update_status("🔄 Loading Whisper model...", "#00d4ff")
+            model = whisper.load_model("base")
+            
+            # Transcribe the audio
+            self.update_status("🎤 Transcribing audio...", "#00d4ff")
+            result = model.transcribe(self.current_recording_path)
+            transcript = result["text"].strip()
+            
+            if transcript:
+                # Update the input field with the transcribed text
+                self.input_field.value = transcript
+                self.update_status(f"✅ Voice transcribed: '{transcript[:50]}{'...' if len(transcript) > 50 else ''}'", "#00ff88")
+                
+                # Focus the input field so user can see the transcribed text
+                self.input_field.focus()
+            else:
+                self.update_status("⚠️ No speech detected in recording", "#ffaa00")
+            
+            # Clean up the recording file
+            try:
+                os.remove(self.current_recording_path)
+            except:
+                pass  # Ignore cleanup errors
+            
+            self.current_recording_path = None
+            self.page.update()
+            
+        except Exception as e:
+            self.update_status(f"❌ Transcription error: {str(e)}", "#ff4444")
+            self.page.update()
 
 def main(page: ft.Page):
     """Main entry point for the Flet app"""
