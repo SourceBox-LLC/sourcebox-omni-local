@@ -10,6 +10,14 @@ import threading
 import time
 from typing import List, Dict, Any
 import flet as ft
+import json
+import threading
+import subprocess
+import sys
+import os
+import shutil
+import tempfile
+from pathlib import Path
 from ollama import chat, ChatResponse
 import datetime
 import platform
@@ -138,6 +146,9 @@ class OllamaAgentGUI:
         # Track pending settings changes
         self.settings_changed = False
         self.save_button = None
+        # File upload functionality
+        self.temp_dir = None
+        self.uploaded_files = []
         self.tools = [self.launch_apps, self.take_screenshot_wrapper, 
                      self.web_search_wrapper, self.get_system_info, self.close_apps, 
                      self.launch_game_wrapper, 
@@ -227,7 +238,11 @@ class OllamaAgentGUI:
         
     def create_ui(self):
         """Create the main UI components"""
-        # Get current theme colors
+        # File picker for file uploads
+        self.file_picker = ft.FilePicker(
+            on_result=self.handle_file_picker_result
+        )
+        self.page.overlay.append(self.file_picker)
         colors = self.settings.get_theme_colors()
         
         # Create header with dynamic styling
@@ -314,18 +329,18 @@ class OllamaAgentGUI:
             on_change=self.handle_input_key
         )
         
-        # File attachment button (placeholder for future functionality)
+        # File attachment button with real functionality
         self.attach_button = ft.Container(
             content=ft.IconButton(
                 icon=ft.Icons.ATTACH_FILE_ROUNDED,
-                on_click=lambda e: None,  # Placeholder - no functionality yet
+                on_click=self.open_file_picker,
                 icon_color="#888888",
                 bgcolor="#2a2a2a",
                 style=ft.ButtonStyle(
                     shape=ft.CircleBorder(),
                     overlay_color="#444444"
                 ),
-                tooltip="File attachment (coming soon)"
+                tooltip="Upload files to chat"
             ),
             width=45,
             height=45
@@ -344,6 +359,27 @@ class OllamaAgentGUI:
             ),
             width=50,
             height=50
+        )
+        
+        # File queue display - persistent inline display when files are attached
+        self.file_queue_row = ft.Container(
+            content=ft.Row([
+                ft.Icon(
+                    ft.Icons.ATTACH_FILE,
+                    size=16,
+                    color=colors["accent"]
+                ),
+                ft.Text(
+                    "Files ready to send:",
+                    size=12,
+                    color=colors["text_secondary"]
+                ),
+                # File chips will be added here dynamically
+            ], spacing=8, scroll=ft.ScrollMode.AUTO),
+            padding=ft.padding.symmetric(horizontal=20, vertical=8),
+            bgcolor=colors["bg_secondary"],
+            border=ft.border.only(top=ft.BorderSide(1, colors["border"])),
+            visible=False  # Initially hidden
         )
         
         input_area = ft.Container(
@@ -408,6 +444,7 @@ class OllamaAgentGUI:
         # Create main content container for page switching
         self.main_content = ft.Column([
             chat_area,
+            self.file_queue_row,  # Add file queue display
             input_area,
             status_area
         ], expand=True, spacing=0)
@@ -1464,6 +1501,199 @@ class OllamaAgentGUI:
                 
         print(f"Debug: {len(enabled_tools)} tools enabled out of {len(self.tools)} total")
         return enabled_tools
+        
+    def create_temp_directory(self) -> str:
+        """Create a temporary directory for file uploads"""
+        if self.temp_dir is None:
+            # Create a temp directory in the system temp folder
+            self.temp_dir = Path(tempfile.mkdtemp(prefix="ollama_agent_uploads_"))
+            print(f"✅ Created temporary directory: {self.temp_dir}")
+            self.add_system_message(f"📁 Created temporary directory for file uploads")
+        return str(self.temp_dir)
+        
+    def handle_file_picker_result(self, e: ft.FilePickerResultEvent):
+        """Handle file picker result and upload files"""
+        if e.files:
+            # Ensure temp directory exists
+            temp_dir = self.create_temp_directory()
+            
+            uploaded_count = 0
+            for file in e.files:
+                try:
+                    # Copy file to temp directory
+                    source_path = file.path
+                    dest_path = Path(temp_dir) / file.name
+                    
+                    # Copy the file
+                    shutil.copy2(source_path, dest_path)
+                    
+                    # Add to uploaded files list
+                    file_info = {
+                        'name': file.name,
+                        'size': file.size,
+                        'path': str(dest_path),
+                        'original_path': source_path
+                    }
+                    self.uploaded_files.append(file_info)
+                    uploaded_count += 1
+                    
+                    print(f"✅ Uploaded: {file.name} ({file.size} bytes) -> {dest_path}")
+                    
+                except Exception as ex:
+                    print(f"❌ Error uploading {file.name}: {ex}")
+                    self.add_system_message(f"❌ Failed to upload {file.name}: {str(ex)}")
+                    
+            if uploaded_count > 0:
+                total_size = sum(f['size'] for f in self.uploaded_files)
+                total_mb = total_size / (1024 * 1024)
+                self.add_system_message(
+                    f"📎 Uploaded {uploaded_count} file(s) successfully!\n" +
+                    f"📊 Total files: {len(self.uploaded_files)} ({total_mb:.2f} MB)"
+                )
+                # Update the UI display
+                self.update_uploaded_files_display()
+                
+    def open_file_picker(self, e):
+        """Open file picker for file upload"""
+        self.file_picker.pick_files(
+            dialog_title="Select files to upload",
+            allow_multiple=True
+        )
+        
+    def clear_uploaded_files(self):
+        """Clear all uploaded files and cleanup temp directory"""
+        try:
+            # Remove all files from temp directory
+            for file_info in self.uploaded_files:
+                if os.path.exists(file_info['path']):
+                    os.remove(file_info['path'])
+                    
+            # Clear the list
+            self.uploaded_files.clear()
+            
+            # Remove temp directory if empty
+            if self.temp_dir and self.temp_dir.exists():
+                try:
+                    self.temp_dir.rmdir()  # Only removes if empty
+                    print(f"✅ Removed temporary directory: {self.temp_dir}")
+                    self.temp_dir = None
+                    self.add_system_message("🧹 Cleared all uploaded files and cleaned up temporary directory")
+                except OSError:
+                    print("⚠️ Temporary directory not empty, keeping it")
+                    
+        except Exception as ex:
+            print(f"❌ Error clearing files: {ex}")
+            self.add_system_message(f"❌ Error clearing files: {str(ex)}")
+            
+    def update_uploaded_files_display(self):
+        """Update the file queue display UI with compact chips"""
+        if not self.uploaded_files:
+            # Hide the file queue if no files
+            self.file_queue_row.visible = False
+        else:
+            # Show the file queue and populate with file chips
+            self.file_queue_row.visible = True
+            
+            # Get current theme colors
+            colors = self.settings.get_theme_colors()
+            
+            # Clear existing file chips (keep icon and label)
+            file_row = self.file_queue_row.content
+            # Keep only the first 2 items (icon and "Files ready to send:" text)
+            file_row.controls = file_row.controls[:2]
+            
+            # Add file chips
+            for file_info in self.uploaded_files:
+                file_size_mb = file_info['size'] / (1024 * 1024)
+                
+                # Create compact file chip
+                file_chip = ft.Container(
+                    content=ft.Row([
+                        ft.Icon(
+                            ft.Icons.INSERT_DRIVE_FILE,
+                            size=12,
+                            color=colors["text_primary"]
+                        ),
+                        ft.Text(
+                            f"{file_info['name']} ({file_size_mb:.1f}MB)",
+                            size=11,
+                            color=colors["text_primary"],
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.CLOSE,
+                            icon_size=12,
+                            icon_color=colors["text_secondary"],
+                            tooltip=f"Remove {file_info['name']}",
+                            on_click=lambda e, f=file_info: self.remove_uploaded_file(f),
+                            style=ft.ButtonStyle(
+                                padding=ft.padding.all(2)
+                            )
+                        )
+                    ], spacing=4, tight=True),
+                    padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                    bgcolor=colors["bg_tertiary"],
+                    border=ft.border.all(1, colors["border"]),
+                    border_radius=15,
+                    margin=ft.margin.only(right=6)
+                )
+                
+                file_row.controls.append(file_chip)
+            
+            # Add clear all button at the end
+            clear_all_chip = ft.Container(
+                content=ft.Row([
+                    ft.Icon(
+                        ft.Icons.CLEAR_ALL,
+                        size=12,
+                        color=colors["text_secondary"]
+                    ),
+                    ft.Text(
+                        "Clear all",
+                        size=11,
+                        color=colors["text_secondary"]
+                    )
+                ], spacing=4, tight=True),
+                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                bgcolor=colors["bg_primary"],
+                border=ft.border.all(1, colors["border"]),
+                border_radius=15,
+                margin=ft.margin.only(left=6),
+                on_click=lambda e: self.clear_all_uploaded_files(),
+                tooltip="Clear all files"
+            )
+            
+            file_row.controls.append(clear_all_chip)
+                
+        self.page.update()
+        
+    def remove_uploaded_file(self, file_info: dict):
+        """Remove a specific uploaded file"""
+        try:
+            # Remove from filesystem
+            if os.path.exists(file_info['path']):
+                os.remove(file_info['path'])
+                print(f"✅ Removed file: {file_info['name']}")
+                
+            # Remove from uploaded files list
+            self.uploaded_files = [f for f in self.uploaded_files if f['path'] != file_info['path']]
+            
+            # Update the display
+            self.update_uploaded_files_display()
+            
+            # Show confirmation message
+            self.add_system_message(f"🗑️ Removed file: {file_info['name']}")
+            
+        except Exception as ex:
+            print(f"❌ Error removing file: {ex}")
+            self.add_system_message(f"❌ Error removing file: {str(ex)}")
+            
+    def clear_all_uploaded_files(self):
+        """Clear all uploaded files (called from UI button)"""
+        if self.uploaded_files:
+            self.clear_uploaded_files()
+            self.update_uploaded_files_display()
 
 
 def main(page: ft.Page):
