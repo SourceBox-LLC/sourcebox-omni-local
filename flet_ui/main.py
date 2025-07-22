@@ -1055,7 +1055,7 @@ class OllamaAgentGUI:
         
         # Create semi-transparent background
         overlay_bg = ft.Container(
-            bgcolor=ft.colors.BLACK54,
+            bgcolor=ft.Colors.BLACK54,
             width=self.page.width,
             height=self.page.height,
             on_click=lambda e: self.dismiss_dialog()
