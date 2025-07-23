@@ -52,9 +52,13 @@ def web_search(query: str, max_results: int = 5) -> str:
             return f"Search results:\n{results}"
         else:
             return f"No search results found for '{query}'. Try a different search term."
-    except Exception as e:
-        # Handle any errors that might occur
-        return f"Error while searching for '{query}': {str(e)}. Please try again with a different query."
+    except Exception:
+        import traceback
+        error_message = traceback.format_exc()
+        # Print the actual error for debugging
+        print(f"Web search error: {error_message}")
+        # Return a more helpful error message with actual error details
+        return f"Error while searching for '{query}': {str(error_message.splitlines()[-1])}. Please try again with a different query."
 
 
 

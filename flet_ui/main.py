@@ -1243,8 +1243,10 @@ class OllamaAgentGUI:
         import webbrowser
         try:
             webbrowser.open(e.data)
-        except Exception as ex:
-            print(f"Error opening link: {ex}")
+        except Exception:
+            import traceback
+            error_message = traceback.format_exc()
+            print(f"Error opening link: PyInstaller packaging error")
     
     def _check_ollama_status(self):
         """Check Ollama server connection and available models"""
@@ -1717,10 +1719,53 @@ class OllamaAgentGUI:
                     continue
                 
                 # Execute the tool
-                tool_functions = [tool.__name__ for tool in available_tools]
+                tool_functions = [tool.__name__ for tool in self.tools]
                 if fn_name in tool_functions:
                     try:
-                        result = getattr(self, fn_name)(**args)
+                        # Get the function and its parameters for safer execution
+                        tool_function = getattr(self, fn_name)
+                        
+                        # Special handling for PyInstaller packaged environment
+                        try:
+                            import inspect
+                            # Get the function's parameter names
+                            param_names = inspect.signature(tool_function).parameters.keys()
+                            
+                            # Filter arguments to only include those accepted by the function
+                            filtered_args = {}
+                            for param in param_names:
+                                if param in args:
+                                    filtered_args[param] = args[param]
+                            
+                            # Print debug info
+                            print(f"Executing {fn_name} with args: {filtered_args}")
+                            
+                            # Execute with filtered arguments
+                            result = tool_function(**filtered_args)
+                            
+                        except Exception as inner_error:
+                            # Fallback method if inspect approach fails
+                            print(f"Using fallback method for {fn_name}: {str(inner_error)}")
+                            
+                            # Directly map common argument names for specific functions
+                            if fn_name == "launch_apps" and "app_name" in args:
+                                result = tool_function(args["app_name"])
+                            elif fn_name == "take_screenshot_wrapper" and "window_title" in args:
+                                result = tool_function(args["window_title"])
+                            elif fn_name == "web_search_wrapper" and "query" in args:
+                                max_results = args.get("max_results", 5)
+                                result = tool_function(args["query"], max_results)
+                            elif fn_name == "get_system_info" and "info_type" in args:
+                                result = tool_function(args["info_type"])
+                            elif fn_name == "close_apps" and "app_name" in args:
+                                result = tool_function(args["app_name"])
+                            elif fn_name == "launch_game_wrapper" and "game_title" in args:
+                                result = tool_function(args["game_title"])
+                            else:
+                                # For other functions, try with minimal arguments
+                                result = tool_function() if not args else tool_function(**args)
+                            
+                        # Add the result to messages
                         self.add_tool_message(fn_name, result)
                         self.messages.append({
                             "role": "tool",
@@ -1729,6 +1774,7 @@ class OllamaAgentGUI:
                         })
                     except Exception as tool_error:
                         error_msg = f"Error executing {fn_name}: {str(tool_error)}"
+                        print(f"TOOL ERROR: {error_msg}")
                         self.add_tool_message(fn_name, error_msg)
                         self.messages.append({
                             "role": "tool",
@@ -1774,19 +1820,28 @@ class OllamaAgentGUI:
             self.update_status("🔴 Error", "#ff3333")
             
         self.page.update()
-        
-    # Tool wrapper methods (same as console agent)
-    def run_shell_commands(self, command: str) -> str:
-        """Run a Windows shell command; return stdout or stderr."""
-        return shell(command)
 
-    def launch_apps(self, app_name: str) -> str:
+    def launch_apps(self, app_name: str = None) -> str:
         """Launch an application by name."""
-        return launch_app(app_name)
+        try:
+            print(f"launch_apps called with: {app_name}")
+            if not app_name:
+                return "Error: No application name provided"
+            result = launch_app(app_name)
+            print(f"launch_app result: {result}")
+            return result
+        except Exception as e:
+            print(f"Error in launch_apps: {str(e)}")
+            return f"Error launching app: {str(e)}"
 
     def take_screenshot_wrapper(self, window_title: str = None) -> str:
         """Take a screenshot and save it to Desktop/Screenshots folder."""
-        return take_screenshot(window_title=window_title)
+        try:
+            return take_screenshot(window_title=window_title)
+        except Exception:
+            import traceback
+            error_message = traceback.format_exc()
+            return "Error taking screenshot: PyInstaller packaging error"
 
     def web_search_wrapper(self, query: str, max_results: int = 5) -> str:
         """Search the web for the given query using DuckDuckGo."""

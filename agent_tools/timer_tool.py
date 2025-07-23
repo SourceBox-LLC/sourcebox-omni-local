@@ -93,8 +93,9 @@ def set_timer(duration_input):
                 "message": "Duration must be greater than 0 seconds"
             }
         
-        # Direct path to the timer GUI
-        timer_path = r"C:\Users\S'Bussiso\Desktop\Local Agent\agent_tools\flet_timer_tool\main.py"
+        # Get path to timer GUI relative to this script
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        timer_path = os.path.join(current_dir, "flet_timer_tool", "main.py")
         
         # Use the current Python executable to ensure same environment
         import sys
@@ -120,10 +121,13 @@ def set_timer(duration_input):
             "message": f"Invalid duration format: {str(e)}"
         }
         
-    except Exception as e:
+    except Exception:
+        import traceback
+        error_message = traceback.format_exc()
+        print(f"Timer error: {error_message}")
         return {
             "success": False,
-            "message": f"Failed to start timer: {str(e)}"
+            "message": f"Failed to start timer: {str(error_message.splitlines()[-1])}"
         }
 
 

@@ -48,8 +48,11 @@ def launch_game(game_title: str) -> str:
             # For non-Steam games, launch the executable directly
             subprocess.Popen(launch_path)
         return f"Successfully launched {game_name}"
-    except Exception as e:
-        return f"Error launching {game_name}: {str(e)}"
+    except Exception:
+        import traceback
+        error_message = traceback.format_exc()
+        print(f"Game launcher error: {error_message}")
+        return f"Error launching {game_name}: {str(error_message.splitlines()[-1])} - please check logs"
 
 
 def _find_game(game_title: str) -> Optional[Tuple[str, str]]:

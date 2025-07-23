@@ -60,8 +60,10 @@ def describe_image(image_path, prompt="Describe this image in as much detail as 
         
         return result
         
-    except Exception as e:
-        error_msg = f"Error analyzing image: {str(e)}"
+    except Exception:
+        import traceback
+        error_message = traceback.format_exc()
+        error_msg = f"Error analyzing image: {str(error_message.splitlines()[-1])}"
         print(f"❌ {error_msg}")
         return error_msg
 

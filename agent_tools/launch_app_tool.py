@@ -180,8 +180,11 @@ def launch_app(app_name: str) -> str:
             )
         
         return f"Successfully launched {app_name} from {app_path}"
-    except Exception as e:
-        return f"Error launching {app_name}: {str(e)}"
+    except Exception:
+        import traceback
+        error_message = traceback.format_exc()
+        print(f"Launch app error: {error_message}")
+        return f"Error launching {app_name}: {str(error_message.splitlines()[-1])}"
 
 
 if __name__ == "__main__":

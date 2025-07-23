@@ -66,9 +66,12 @@ def set_wallpaper(image_path: str) -> str:
             logger.error(f"Failed to set wallpaper. Windows error code: {error_code}")
             return f"❌ Failed to set wallpaper. Windows error code: {error_code}"
             
-    except Exception as e:
+    except Exception:
+        import traceback
+        error_message = traceback.format_exc()
         logger.exception("Error setting wallpaper")
-        return f"❌ Error setting wallpaper: {str(e)}"
+        print(f"Wallpaper setting error: {error_message}")
+        return f"❌ Error setting wallpaper: {str(error_message.splitlines()[-1])} - please check logs"
 
 def get_current_wallpaper() -> Dict[str, Any]:
     """
@@ -120,11 +123,13 @@ def get_current_wallpaper() -> Dict[str, Any]:
             "note": "The wallpaper setter will still work for setting new wallpapers."
         }
             
-    except Exception as e:
+    except Exception:
+        import traceback
+        error_message = traceback.format_exc()
         logger.exception("Error getting current wallpaper")
         return {
             "success": False,
-            "error": f"Error getting current wallpaper: {str(e)}"
+            "error": f"Error getting current wallpaper: {str(error_message.splitlines()[-1])} - please check logs"
         }
 
 # For testing when run directly

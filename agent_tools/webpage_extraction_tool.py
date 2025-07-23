@@ -36,8 +36,10 @@ def load_web_content(urls: Union[str, List[str]]) -> Dict[str, Any]:
                     valid_urls.append(url)
                 else:
                     logger.warning(f"Invalid URL format: {url}")
-            except Exception as e:
-                logger.warning(f"Error parsing URL {url}: {e}")
+            except Exception:
+                import traceback
+                error_message = traceback.format_exc()
+                logger.warning(f"Error parsing URL {url}: {str(error_message.splitlines()[-1])}")
         
         if not valid_urls:
             return {
@@ -102,11 +104,13 @@ def load_web_content(urls: Union[str, List[str]]) -> Dict[str, Any]:
             }
         }
         
-    except Exception as e:
+    except Exception:
+        import traceback
+        error_message = traceback.format_exc()
         logger.exception("Error loading web content")
         return {
             "success": False,
-            "error": f"Error loading web content: {str(e)}",
+            "error": f"Error loading web content: {str(error_message.splitlines()[-1])}",
             "content": ""
         }
 

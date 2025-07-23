@@ -49,9 +49,13 @@ def generate_image(prompt: str, save_path: str = "output.png") -> str:
             print(f"Image saved as output.png")
             return f"Image saved as output.png"
         
-    except Exception as e:
-        print(f"Error generating image: {e}")
-        return f"Error generating image: {e}"
+    except Exception:
+        # Store exception in a variable with a different name to avoid PyInstaller scope issues
+        import traceback
+        error_message = traceback.format_exc()
+        print(f"Error generating image: {error_message}")
+        print(f"Image generation error: {error_message}")
+        return f"Error generating image: {str(error_message.splitlines()[-1])} - please check logs"
 
 
 if __name__ == "__main__":
