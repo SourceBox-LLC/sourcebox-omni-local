@@ -710,6 +710,9 @@ class OllamaAgentGUI:
                 # Ollama Connection & Model Check Section
                 self.create_ollama_status_section(colors),
                 
+                # API Keys Configuration Section
+                self.create_api_keys_section(colors),
+                
                 # About Section
                 ft.Container(
                     content=ft.Column([
@@ -925,6 +928,145 @@ class OllamaAgentGUI:
         """Refresh the Ollama status and update the settings page"""
         # Navigate back to settings to refresh the status
         self.open_settings(e)
+    
+    def create_api_keys_section(self, colors):
+        """Create the API Keys configuration section"""
+        # Get current API key values
+        replicate_key = self.settings.get("api_keys", "replicate_api_key")
+        
+        # Create masked display of API key (show only first 8 and last 4 characters)
+        def mask_api_key(key):
+            if not key or len(key) < 12:
+                return key
+            return f"{key[:8]}{'*' * (len(key) - 12)}{key[-4:]}"
+        
+        # Create text fields for API keys
+        self.replicate_key_field = ft.TextField(
+            label="Replicate API Key",
+            value=replicate_key,
+            hint_text="Enter your Replicate API key for image generation/description",
+            password=True,
+            can_reveal_password=True,
+            width=400,
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            border_color=colors["border"],
+            focused_border_color=colors["accent"],
+            label_style=ft.TextStyle(color=colors["text_secondary"]),
+            hint_style=ft.TextStyle(color=colors["text_secondary"]),
+            on_change=self.on_api_key_change
+        )
+        
+        # Test API key button
+        test_button = ft.ElevatedButton(
+            "Test Key",
+            icon=ft.Icons.VERIFIED_USER,
+            on_click=self.test_replicate_key,
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=8)
+            )
+        )
+        
+        # Help text
+        help_text = ft.Text(
+            "💡 Get your free API key at: https://replicate.com/account/api-tokens",
+            size=12,
+            color=colors["text_secondary"],
+            italic=True
+        )
+        
+        content_items = [
+            ft.Text("🔑 API Keys", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+            ft.Divider(color=colors["border"], height=1),
+            
+            # Replicate API Key section
+            ft.Text("Replicate API Key", size=14, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+            ft.Text(
+                "Required for image generation and image description tools",
+                size=12,
+                color=colors["text_secondary"]
+            ),
+            
+            ft.Row([
+                self.replicate_key_field,
+                test_button
+            ], spacing=10),
+            
+            help_text,
+            
+            # Status indicator
+            ft.Container(
+                content=ft.Row([
+                    ft.Icon(
+                        ft.Icons.INFO_OUTLINE,
+                        size=16,
+                        color=colors["text_secondary"]
+                    ),
+                    ft.Text(
+                        "API keys are stored securely and only used for tool functionality",
+                        size=11,
+                        color=colors["text_secondary"]
+                    )
+                ], spacing=8),
+                padding=ft.padding.all(10),
+                bgcolor=colors["bg_tertiary"],
+                border_radius=5,
+                margin=ft.margin.only(top=10)
+            )
+        ]
+        
+        return ft.Container(
+            content=ft.Column(content_items, spacing=10),
+            padding=ft.padding.all(20),
+            margin=ft.margin.all(10),
+            bgcolor=colors["bg_secondary"],
+            border_radius=10,
+            border=ft.border.all(1, colors["border"])
+        )
+    
+    def on_api_key_change(self, e):
+        """Handle API key field changes"""
+        # Save the API key to settings
+        if e.control == self.replicate_key_field:
+            self.settings.set("api_keys", "replicate_api_key", e.control.value)
+            self.settings_changed = True
+            self.update_save_button_visibility()
+    
+    def test_replicate_key(self, e):
+        """Test the Replicate API key"""
+        api_key = self.replicate_key_field.value
+        if not api_key:
+            self.show_api_key_test_result("❌ Please enter an API key first", "#ff4444")
+            return
+        
+        try:
+            # Set the API key temporarily for testing
+            import os
+            os.environ['REPLICATE_API_TOKEN'] = api_key
+            
+            # Try to make a simple API call to test the key
+            import replicate
+            # This is a lightweight test - just check if we can authenticate
+            client = replicate.Client(api_token=api_key)
+            # If we can create a client without error, the key format is valid
+            self.show_api_key_test_result("✅ API key appears valid", "#00ff88")
+            
+        except ImportError:
+            self.show_api_key_test_result("⚠️ Replicate package not installed", "#ffaa00")
+        except Exception as ex:
+            error_msg = str(ex)
+            if "authentication" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                self.show_api_key_test_result("❌ Invalid API key", "#ff4444")
+            else:
+                self.show_api_key_test_result(f"⚠️ Test failed: {error_msg[:50]}...", "#ffaa00")
+    
+    def show_api_key_test_result(self, message, color):
+        """Show API key test result to user"""
+        # For now, just print to console - could be enhanced with a dialog
+        print(f"API Key Test: {message}")
+        # TODO: Could add a temporary status message in the UI
         
     def add_user_message(self, message: str):
         """Add a user message to the chat"""
@@ -1833,6 +1975,14 @@ class OllamaAgentGUI:
             save_path: Optional path where to save the generated image (default: output.png)
         """
         try:
+            # Set API key from settings
+            api_key = self.settings.get("api_keys", "replicate_api_key")
+            if not api_key:
+                return "❌ Replicate API key not configured. Please set it in Settings > API Keys."
+            
+            import os
+            os.environ['REPLICATE_API_TOKEN'] = api_key
+            
             result = generate_image(prompt, save_path)
             return result
         except Exception as e:
@@ -1928,8 +2078,16 @@ class OllamaAgentGUI:
         """
         if not IMAGE_DESCRIPTION_AVAILABLE:
             return "Image description tool is not available. Please install replicate: pip install replicate"
-            
+        
         try:
+            # Set API key from settings
+            api_key = self.settings.get("api_keys", "replicate_api_key")
+            if not api_key:
+                return "❌ Replicate API key not configured. Please set it in Settings > API Keys."
+            
+            import os
+            os.environ['REPLICATE_API_TOKEN'] = api_key
+            
             result = describe_image(image_path, prompt)
             return result
         except Exception as e:

@@ -29,7 +29,11 @@ class SettingsManager:
                 "file_operations": True,
                 "game_launcher": True,
                 "image_generation": True,
+                "image_description": True,
                 "timer_tool": True
+            },
+            "api_keys": {
+                "replicate_api_key": ""
             }
         }
         
