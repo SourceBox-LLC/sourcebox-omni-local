@@ -151,6 +151,14 @@ except ImportError as e:
         return {"success": False, "message": f"Timer tool unavailable - {str(e)}"}
     TIMER_TOOL_AVAILABLE = False
 
+try:
+    from agent_tools.image_description_tool import describe_image
+    IMAGE_DESCRIPTION_AVAILABLE = True
+except ImportError as e:
+    def describe_image(image_path, prompt="Describe this image in as much detail as possible"):
+        return f"Error: Image description tool unavailable - {str(e)}. Please install replicate: pip install replicate"
+    IMAGE_DESCRIPTION_AVAILABLE = False
+
 # Audio transcription with Whisper
 try:
     import whisper
@@ -202,7 +210,9 @@ class OllamaAgentGUI:
                      self.close_app_by_name_wrapper,
                      self.list_processes_wrapper,
                      # Timer tool
-                     self.set_timer_wrapper]
+                     self.set_timer_wrapper,
+                     # Image description tool
+                     self.describe_image_wrapper]
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -252,7 +262,8 @@ class OllamaAgentGUI:
             "17. extract_webpage_content(url): Extract and return the full content of a webpage for analysis\n" +
             "18. close_app_by_name_wrapper(app_name, force_kill=False): Close applications by partial process name match with detailed results\n" +
             "19. list_processes_wrapper(): List all running processes on the system\n" +
-            "20. set_timer_wrapper(duration): Set a timer using natural language (e.g., '5 minutes', '30 seconds', '1 hour')\n\n" +
+            "20. set_timer_wrapper(duration): Set a timer using natural language (e.g., '5 minutes', '30 seconds', '1 hour')\n" +
+            "21. describe_image_wrapper(image_path, prompt='Describe this image in as much detail as possible'): Analyze and describe images using AI vision (supports JPG, PNG, GIF, BMP, WEBP)\n\n" +
 
             "IMPORTANT NOTE: the launch_apps tool and launch_game_wrapper tool are different.\n" +
             "the launch_app tool is for applications (steam, discord, spotify, etc) while the launch_game_wrapper tool is used ONLY for launching games.\n" +
@@ -679,6 +690,14 @@ class OllamaAgentGUI:
                                 on_change=lambda e: self.on_tool_toggle("image_generation", e.control.value)
                             ),
                             ft.Text("Image Generation", color=colors["text_primary"], size=14)
+                        ]),
+                        ft.Row([
+                            ft.Checkbox(
+                                value=self.settings.get("tools", "image_description"),
+                                active_color="#00d4ff",
+                                on_change=lambda e: self.on_tool_toggle("image_description", e.control.value)
+                            ),
+                            ft.Text("Image Description", color=colors["text_primary"], size=14)
                         ])
                     ]),
                     padding=ft.padding.all(20),
@@ -1896,6 +1915,25 @@ class OllamaAgentGUI:
                 return str(result)
         except Exception as e:
             return f"Error setting timer: {str(e)}"
+    
+    def describe_image_wrapper(self, image_path: str, prompt: str = "Describe this image in as much detail as possible") -> str:
+        """Analyze and describe an image using AI vision.
+        
+        Args:
+            image_path: Full path to the image file to analyze
+            prompt: Custom prompt for image description (optional)
+            
+        Returns:
+            str: Detailed description of the image or error message
+        """
+        if not IMAGE_DESCRIPTION_AVAILABLE:
+            return "Image description tool is not available. Please install replicate: pip install replicate"
+            
+        try:
+            result = describe_image(image_path, prompt)
+            return result
+        except Exception as e:
+            return f"Error describing image: {str(e)}"
 
     def is_tool_enabled(self, tool_name):
         """Check if a specific tool is enabled in settings"""
@@ -1922,6 +1960,7 @@ class OllamaAgentGUI:
             "set_wallpaper_wrapper": "image_generation", # Wallpaper uses image generation setting
             "extract_webpage_content": "web_search",  # Web extraction uses web_search setting
             "set_timer_wrapper": "timer_tool",  # Timer tool
+            "describe_image_wrapper": "image_description",  # Image description tool
         }
         
         # Default to disabled for tools without specific settings (security first)
