@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Settings Manager for Local Ollama Agent
+Settings Manager for SourceBox OmniLocal
 Handles loading, saving, and applying user settings
 """
 
@@ -11,7 +11,7 @@ from typing import Dict, Any
 
 class SettingsManager:
     def __init__(self):
-        self.settings_file = Path.home() / ".local_ollama_agent" / "settings.json"
+        self.settings_file = Path.home() / ".sourcebox_omnilocal" / "settings.json"
         self.settings_file.parent.mkdir(exist_ok=True)
         
         # Default settings

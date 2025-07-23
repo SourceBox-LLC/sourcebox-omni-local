@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
-Flet GUI for Local Ollama Agent
-Beautiful graphical interface for the console-based agent
+SourceBox OmniLocal - Local-First AI Desktop Assistant
+Beautiful graphical interface with powerful on-device AI capabilities
+Copyright (c) 2024 SourceBox LLC
 """
 
 import sys
@@ -219,7 +220,7 @@ class OllamaAgentGUI:
         
     def setup_page(self):
         """Configure the main page settings"""
-        self.page.title = "🤖 Local Ollama Agent"
+        self.page.title = "🔊 SourceBox OmniLocal"
         self.page.theme_mode = ft.ThemeMode.DARK
         self.page.padding = 0
         self.page.window_width = 1200
@@ -232,7 +233,7 @@ class OllamaAgentGUI:
     def setup_system_message(self):
         """Initialize the system message (same as console agent)"""
         system_msg = (
-            "You are an AI agent on Windows. You achieve goals by invoking under the hood, built in tools. " +
+            "Your name is Omni, created by SourceBox LLC. You are the creation of the SourceBox OmniLocal Project. You are an AI agent on Windows. You achieve goals by invoking under the hood, built in tools. " +
             
             "This  .\n"
             
@@ -329,7 +330,7 @@ class OllamaAgentGUI:
                 ft.Container(
                     content=ft.Row([
                         ft.Icon(ft.Icons.SMART_TOY, color=colors["accent"], size=30),
-                        ft.Text("🤖 Local Ollama Agent", size=20, weight=ft.FontWeight.BOLD, color=colors["text_primary"])
+                        ft.Text("🔊 SourceBox OmniLocal", size=20, weight=ft.FontWeight.BOLD, color=colors["text_primary"])
                     ], spacing=10),
                     padding=ft.padding.only(left=20)
                 ),
@@ -481,7 +482,7 @@ class OllamaAgentGUI:
                 self.status_text,
                 ft.Container(expand=True),
                 ft.Text(
-                    "Powered by Ollama + Flet",
+                    "SourceBox OmniLocal - Local AI, Unlimited Potential",
                     size=11,
                     color="#666666",
                     italic=True
@@ -493,8 +494,8 @@ class OllamaAgentGUI:
         
         # Add beautiful welcome message
         self.add_system_message(
-            "🚀 Welcome to Local Ollama Agent!\n\n" +
-            "I'm your AI assistant with powerful local capabilities:\n\n" +
+            "🔊 Welcome to SourceBox OmniLocal!\n\n" +
+            "I'm your local-first AI assistant with powerful on-device capabilities:\n\n" +
             "💻 System & File Operations\n" +
             "  • File management & editing\n\n" +
             "  • Close running applications\n\n" +
@@ -718,8 +719,9 @@ class OllamaAgentGUI:
                     content=ft.Column([
                         ft.Text("ℹ️ About", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
                         ft.Divider(color=colors["border"], height=1),
-                        ft.Text("Local Ollama Agent v1.0", color=colors["text_primary"], size=14),
-                        ft.Text("AI-powered desktop assistant", color=colors["text_secondary"], size=12),
+                        ft.Text("SourceBox OmniLocal v1.0", color=colors["text_primary"], size=14, weight=ft.FontWeight.W_500),
+                        ft.Text("Local-first AI desktop assistant", color=colors["text_secondary"], size=12),
+                        ft.Text("© 2024 SourceBox LLC", color=colors["text_secondary"], size=12),
                         ft.Text("Built with Flet & Python", color=colors["text_secondary"], size=12)
                     ]),
                     padding=ft.padding.all(20),
