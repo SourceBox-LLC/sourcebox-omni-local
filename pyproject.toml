@@ -1,0 +1,37 @@
+[project]
+name = "SourceBox OmniLocal"
+version = "1.0.0"
+description = "Local Ollama Agent GUI"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    {name = "SourceBox LLC", email = "sbussiso@sourcebox.cloud"}
+]
+dependencies = [
+    "flet",
+    "ollama",
+    "pygame",
+    "numpy",
+    "psutil",
+    "langchain-unstructured[local]",
+    "langchain_community",
+    "duckduckgo_search",
+    "replicate",
+    "pyautogui",
+    "mss",
+    "openai-whisper"
+]
+
+[build-system]
+requires = ["flet-cli"]
+build-backend = "flet.cli.build"
+
+[tool.flet]
+org = "com.sourcebox"
+product = "SourceBox OmniLocal"
+company = "SourceBox LLC"
+copyright = "Copyright (C) 2025 by SourceBox LLC"
+
+[tool.flet.app]
+path = "src"
+module-name = "main"

@@ -24,7 +24,7 @@ import datetime
 import platform
 from settings import SettingsManager
 
-# Add parent directory to path to import agent tools
+# Add project root directory to path to import agent tools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import tools from agent_tools package
@@ -656,7 +656,7 @@ class OllamaAgentGUI:
                             ft.Checkbox(
                                 value=self.settings.get("tools", "screenshot_tool"),
                                 active_color="#00d4ff",
-                                on_change=lambda e: self.on_tool_toggle("screenshot_tool", e.control.value)
+                                on_change=lambda event_param: self.on_tool_toggle("screenshot_tool", event_param.control.value)
                             ),
                             ft.Text("Screenshot Tool", color=colors["text_primary"], size=14)
                         ]),
@@ -664,7 +664,7 @@ class OllamaAgentGUI:
                             ft.Checkbox(
                                 value=self.settings.get("tools", "web_search"),
                                 active_color="#00d4ff",
-                                on_change=lambda e: self.on_tool_toggle("web_search", e.control.value)
+                                on_change=lambda event_param: self.on_tool_toggle("web_search", event_param.control.value)
                             ),
                             ft.Text("Web Search", color=colors["text_primary"], size=14)
                         ]),
@@ -672,7 +672,7 @@ class OllamaAgentGUI:
                             ft.Checkbox(
                                 value=self.settings.get("tools", "file_operations"),
                                 active_color="#00d4ff",
-                                on_change=lambda e: self.on_tool_toggle("file_operations", e.control.value)
+                                on_change=lambda event_param: self.on_tool_toggle("file_operations", event_param.control.value)
                             ),
                             ft.Text("File Operations", color=colors["text_primary"], size=14)
                         ]),
@@ -680,7 +680,7 @@ class OllamaAgentGUI:
                             ft.Checkbox(
                                 value=self.settings.get("tools", "game_launcher"),
                                 active_color="#00d4ff",
-                                on_change=lambda e: self.on_tool_toggle("game_launcher", e.control.value)
+                                on_change=lambda event_param: self.on_tool_toggle("game_launcher", event_param.control.value)
                             ),
                             ft.Text("Game Launcher", color=colors["text_primary"], size=14)
                         ]),
@@ -688,7 +688,7 @@ class OllamaAgentGUI:
                             ft.Checkbox(
                                 value=self.settings.get("tools", "image_generation"),
                                 active_color="#00d4ff",
-                                on_change=lambda e: self.on_tool_toggle("image_generation", e.control.value)
+                                on_change=lambda event_param: self.on_tool_toggle("image_generation", event_param.control.value)
                             ),
                             ft.Text("Image Generation", color=colors["text_primary"], size=14)
                         ]),
@@ -696,7 +696,7 @@ class OllamaAgentGUI:
                             ft.Checkbox(
                                 value=self.settings.get("tools", "image_description"),
                                 active_color="#00d4ff",
-                                on_change=lambda e: self.on_tool_toggle("image_description", e.control.value)
+                                on_change=lambda event_param: self.on_tool_toggle("image_description", event_param.control.value)
                             ),
                             ft.Text("Image Description", color=colors["text_primary"], size=14)
                         ])
@@ -1567,7 +1567,7 @@ class OllamaAgentGUI:
             bgcolor=ft.Colors.BLACK54,
             width=self.page.width,
             height=self.page.height,
-            on_click=lambda e: self.dismiss_dialog()
+            on_click=lambda event_param: self.dismiss_dialog()
         )
         
         # Create dialog content
@@ -1596,7 +1596,7 @@ class OllamaAgentGUI:
                             [   
                                 ft.FilledButton(
                                     "OK",
-                                    on_click=lambda e: self.dismiss_dialog(),
+                                    on_click=lambda event_param: self.dismiss_dialog(),
                                 ),
                             ],
                             alignment=ft.MainAxisAlignment.END,
@@ -1838,10 +1838,11 @@ class OllamaAgentGUI:
         """Take a screenshot and save it to Desktop/Screenshots folder."""
         try:
             return take_screenshot(window_title=window_title)
-        except Exception:
+        except Exception as exception_obj:
             import traceback
             error_message = traceback.format_exc()
-            return "Error taking screenshot: PyInstaller packaging error"
+            print(f"Screenshot error details: {error_message}")
+            return f"Error taking screenshot: {str(exception_obj)}"
 
     def web_search_wrapper(self, query: str, max_results: int = 5) -> str:
         """Search the web for the given query using DuckDuckGo."""
@@ -2407,7 +2408,7 @@ class OllamaAgentGUI:
                         icon_size=12,
                         icon_color=colors["text_secondary"],
                         tooltip=f"Remove {file_info['name']}",
-                        on_click=lambda e, f=file_info: self.remove_uploaded_file(f),
+                        on_click=lambda event_param, f=file_info: self.remove_uploaded_file(f),
                         style=ft.ButtonStyle(
                             padding=ft.padding.all(2)
                         )
@@ -2446,7 +2447,7 @@ class OllamaAgentGUI:
                 border=ft.border.all(1, colors["border"]),
                 border_radius=15,
                 margin=ft.margin.only(left=6),
-                on_click=lambda e: self.clear_all_uploaded_files(),
+                on_click=lambda event_param: self.clear_all_uploaded_files(),
                 tooltip="Clear all files"
             )
             
