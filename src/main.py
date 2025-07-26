@@ -13,12 +13,20 @@ from typing import List, Dict, Any
 import flet as ft
 import json
 import threading
+import asyncio
 import subprocess
 import sys
 import os
 import shutil
 import tempfile
+import uuid
+import webbrowser
+import traceback
+import socket
+import psutil
+import sys
 from pathlib import Path
+import GPUtil
 from ollama import chat, ChatResponse
 import datetime
 import platform
@@ -230,6 +238,33 @@ class OllamaAgentGUI:
         self.page.window_title_bar_hidden = False
         self.page.window_title_bar_buttons_hidden = False
         
+        # System metrics containers for charts
+        self.cpu_chart_container = ft.Container(
+            content=None,  # Will be set in create_chart method
+            expand=True,
+            height=40,
+            border_radius=5,
+            padding=0
+        )
+        
+        self.ram_chart_container = ft.Container(
+            content=None,  # Will be set in create_chart method
+            expand=True,
+            height=40,
+            border_radius=5,
+            padding=0
+        )
+        
+        self.live_stats_text = ft.Text(
+            "Initializing system metrics...", 
+            size=14,
+            color="#808080"
+        )
+        
+        # CPU and RAM history data for charts (last 60 data points)
+        self.cpu_history = [0] * 60
+        self.ram_history = [0] * 60
+        
     def setup_system_message(self):
         """Initialize the system message (same as console agent)"""
         system_msg = (
@@ -313,6 +348,18 @@ class OllamaAgentGUI:
             )
         )
         
+        self.computer_button = ft.IconButton(
+            icon=ft.Icons.COMPUTER,
+            tooltip="System",
+            on_click=self.open_system_page,
+            icon_color=colors["text_primary"],
+            bgcolor=colors["bg_secondary"],
+            style=ft.ButtonStyle(
+                shape=ft.CircleBorder(),
+                overlay_color=colors["border"]
+            )
+        )
+        
         self.refresh_button = ft.IconButton(
             icon=ft.Icons.REFRESH,
             tooltip="Clear Chat",
@@ -337,6 +384,7 @@ class OllamaAgentGUI:
                 ft.Container(expand=True),
                 ft.Container(
                     content=ft.Row([
+                        self.computer_button,
                         self.settings_button,
                         self.refresh_button
                     ], spacing=10),
@@ -744,6 +792,616 @@ class OllamaAgentGUI:
             settings_content
         ], expand=True, spacing=0)
         
+    def create_system_page(self):
+        """Create the system page UI with dynamic theming"""
+        # Get current theme colors
+        colors = self.settings.get_theme_colors()
+        
+        # System page header with back button
+        system_header = ft.Container(
+            content=ft.Row([
+                ft.IconButton(
+                    icon=ft.Icons.ARROW_BACK,
+                    tooltip="Back to Chat",
+                    on_click=self.back_to_chat,
+                    icon_color=colors["text_primary"],
+                    bgcolor=colors["bg_secondary"],
+                    style=ft.ButtonStyle(
+                        shape=ft.CircleBorder(),
+                        overlay_color=colors["border"]
+                    )
+                ),
+                ft.Text(
+                    "System", 
+                    size=24, 
+                    weight=ft.FontWeight.W_600,
+                    color=colors["text_primary"]
+                ),
+                ft.Container(expand=True)
+            ]),
+            padding=ft.padding.all(20),
+            bgcolor=colors["bg_secondary"],
+            border=ft.border.only(bottom=ft.BorderSide(2, colors["border"]))
+        )
+        
+        # System content - placeholder for now
+        system_content = ft.Container(
+            content=ft.Column([
+                # System Info Section
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("💻 System Information", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+                        ft.Divider(color=colors["border"], height=1),
+                        
+                        # OS Information
+                        ft.Text("🖥️ Operating System", size=16, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+                        ft.Text(f"OS: {platform.system()} {platform.release()} ({platform.version()})", color=colors["text_primary"], size=14),
+                        ft.Text(f"Architecture: {platform.machine()}", color=colors["text_primary"], size=14),
+                        ft.Text(f"Node Name: {platform.node()}", color=colors["text_primary"], size=14),
+                        ft.Text(f"Windows Edition: {platform.win32_edition() if hasattr(platform, 'win32_edition') else 'N/A'}", color=colors["text_primary"], size=14),
+                        ft.Divider(color=colors["border"], height=1),
+                        
+                        # Hardware Information
+                        ft.Text("🔌 Hardware", size=16, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+                        ft.Text(f"Processor: {platform.processor()}", color=colors["text_primary"], size=14),
+                        ft.Text(f"CPU Cores: {psutil.cpu_count(logical=False)} Physical, {psutil.cpu_count(logical=True)} Logical", color=colors["text_primary"], size=14),
+                        ft.Text(f"Total RAM: {round(psutil.virtual_memory().total / (1024**3), 2)} GB", color=colors["text_primary"], size=14),
+                        ft.Text(f"Available RAM: {round(psutil.virtual_memory().available / (1024**3), 2)} GB", color=colors["text_primary"], size=14),
+                        ft.Text(f"RAM Usage: {psutil.virtual_memory().percent}%", color=colors["text_primary"], size=14),
+                        ft.Divider(color=colors["border"], height=1),
+                        
+                        # Disk Information
+                        ft.Text("💾 Storage", size=16, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+                        *self.get_disk_info(colors),
+                        ft.Divider(color=colors["border"], height=1),
+                        
+                        # User Information
+                        ft.Text("👤 User", size=16, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+                        ft.Text(f"Current User: {os.getlogin()}", color=colors["text_primary"], size=14),
+                        ft.Text(f"User Home: {os.path.expanduser('~')}", color=colors["text_primary"], size=14),
+                    ]),
+                    padding=ft.padding.all(20),
+                    margin=ft.margin.all(10),
+                    bgcolor=colors["bg_secondary"],
+                    border_radius=10,
+                    border=ft.border.all(1, colors["border"])
+                ),
+                
+                # Live System Metrics Section
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("📈 Live System Metrics", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+                        ft.Divider(color=colors["border"], height=1),
+                        
+                        # CPU Usage Graph
+                        ft.Container(
+                            content=ft.Column([
+                                ft.Text("CPU Usage", size=16, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+                                ft.Row([
+                                    ft.Container(
+                                        content=ft.Text("0%", color=colors["text_secondary"], size=12),
+                                        alignment=ft.alignment.center_left,
+                                        width=30
+                                    ),
+                                    self.cpu_chart_container,
+                                    ft.Container(
+                                        content=ft.Text("100%", color=colors["text_secondary"], size=12),
+                                        alignment=ft.alignment.center_right,
+                                        width=40
+                                    ),
+                                ]),
+                                ft.Container(height=10),
+                            ])
+                        ),
+                        
+                        # RAM Usage Graph
+                        ft.Container(
+                            content=ft.Column([
+                                ft.Text("RAM Usage", size=16, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+                                ft.Row([
+                                    ft.Container(
+                                        content=ft.Text("0%", color=colors["text_secondary"], size=12),
+                                        alignment=ft.alignment.center_left,
+                                        width=30
+                                    ),
+                                    self.ram_chart_container,
+                                    ft.Container(
+                                        content=ft.Text("100%", color=colors["text_secondary"], size=12),
+                                        alignment=ft.alignment.center_right,
+                                        width=40
+                                    ),
+                                ]),
+                                ft.Container(height=10),
+                            ])
+                        ),
+                        
+                        # GPU Usage Chart
+                        ft.Container(
+                            content=ft.Column([
+                                ft.Text("GPU Usage", size=16, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+                                ft.Row([
+                                    ft.Container(
+                                        content=ft.Text("0%", color=colors["text_secondary"], size=12),
+                                        alignment=ft.alignment.center_left,
+                                        width=30
+                                    ),
+                                    self.gpu_chart_container,
+                                    ft.Container(
+                                        content=ft.Text("100%", color=colors["text_secondary"], size=12),
+                                        alignment=ft.alignment.center_right,
+                                        width=40
+                                    ),
+                                ]),
+                                ft.Container(height=10),
+                            ])
+                        ),
+                        
+                        # System Stats Text
+                        self.live_stats_text,
+                    ]),
+                    padding=ft.padding.all(20),
+                    margin=ft.margin.all(10),
+                    bgcolor=colors["bg_secondary"],
+                    border_radius=10,
+                    border=ft.border.all(1, colors["border"])
+                ),
+            ], scroll=ft.ScrollMode.AUTO),
+            expand=True,
+            padding=ft.padding.all(10),
+            bgcolor=colors["bg_primary"]
+        )
+        
+        return ft.Column([
+            system_header,
+            system_content
+        ], expand=True, spacing=0)
+    
+    def open_system_page(self, e=None):
+        """Open the system page"""
+        # Get current theme colors
+        colors = self.settings.get_theme_colors()
+        
+        # Create initial data for charts
+        if not hasattr(self, 'cpu_history'):
+            self.cpu_history = [0] * 60
+            self.ram_history = [0] * 60
+        
+        # Always make sure GPU histories are initialized (might be first time or after update)
+        self.gpu_histories = []
+        self.gpu_names = []
+        self.gpu_count = 0
+            
+        # Try to get initial GPU data for all available GPUs
+        try:
+            gpus = GPUtil.getGPUs()
+            self.gpu_count = len(gpus)
+            
+            # Initialize histories for each GPU
+            if self.gpu_count > 0:
+                for gpu in gpus:
+                    self.gpu_histories.append([0] * 60)
+                    self.gpu_names.append(gpu.name)
+                    # Set initial value for each GPU
+                    self.gpu_histories[-1][-1] = gpu.load * 100  # Convert to percentage
+            
+            # Ensure at least one GPU history exists even if no GPUs
+            if self.gpu_count == 0:
+                self.gpu_histories = [[0] * 60]  # Default empty history
+                self.gpu_names = ["No GPU detected"]
+        
+        except Exception as e:
+            print(f"GPU initialization error: {str(e)}")
+            self.gpu_histories = [[0] * 60]  # Default empty history
+            self.gpu_names = ["GPU Error"]
+            self.gpu_count = 0
+        
+        # Initialize chart containers before creating system page
+        self.cpu_chart_container = ft.Container(expand=True, height=150)
+        self.ram_chart_container = ft.Container(expand=True, height=150)
+        self.gpu_chart_container = ft.Container(expand=True, height=150)
+        self.live_stats_text = ft.Text("Initializing system metrics...", color=colors["text_secondary"], size=14)
+        
+        # Get initial CPU and RAM usage values
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        ram_percent = psutil.virtual_memory().percent
+        
+        # Initialize history data with real values
+        self.cpu_history = [0] * 59 + [cpu_percent]
+        self.ram_history = [0] * 59 + [ram_percent]
+        
+        # Initialize the charts with the CPU and RAM data
+        cpu_chart = self.create_chart(self.cpu_history, colors["accent"])
+        ram_chart = self.create_chart(self.ram_history, "#4CAF50")
+        self.cpu_chart_container.content = cpu_chart
+        self.ram_chart_container.content = ram_chart
+        
+        # Create multiple GPU charts if available
+        if self.gpu_count > 0:
+            # Create a column to hold all GPU charts
+            gpu_charts_column = ft.Column(spacing=5)
+            
+            # Create a chart for each GPU
+            gpu_colors = ["#FF9800", "#E91E63"]  # Orange and Pink for different GPUs
+            for i in range(min(2, self.gpu_count)):  # Limit to 2 GPUs for now to avoid cluttering
+                gpu_label = ft.Text(f"{self.gpu_names[i]}", size=14, weight=ft.FontWeight.W_500, color=colors["text_primary"])
+                gpu_chart = self.create_chart(self.gpu_histories[i], gpu_colors[i % len(gpu_colors)])
+                gpu_charts_column.controls.append(gpu_label)
+                gpu_charts_column.controls.append(gpu_chart)
+            
+            self.gpu_chart_container.content = gpu_charts_column
+        else:
+            # No GPUs detected
+            self.gpu_chart_container.content = ft.Text("No GPU detected", color=colors["text_secondary"])
+        
+        # Create the system page - this will now reference the initialized containers
+        system_page = self.create_system_page()
+        
+        # Replace main content with system page
+        self.main_content.controls = [system_page]
+        self.page.update()
+        
+        # Now that controls are added to the page, start updating metrics
+        self.timer_active = True
+        print("Setting up system metrics update interval (direct approach)")
+        
+        # Do an initial update
+        self.update_system_metrics()
+        
+        # Create a timer thread function that directly updates without invoke_async
+        def timer_thread_function():
+            print("Timer thread started")
+            update_count = 0
+            while self.timer_active:
+                try:
+                    # Sleep for 1 second
+                    time.sleep(1)
+                    # Call update if timer is still active
+                    if self.timer_active:
+                        update_count += 1
+                        if update_count % 5 == 0:  # Log every 5 seconds
+                            print(f"Timer thread still active, update #{update_count}")
+                        # Direct call to update metrics - no fancy API methods needed
+                        self.update_system_metrics()
+                except Exception as e:
+                    print(f"Error in timer thread: {str(e)}")
+            print("Timer thread exiting")
+        
+        # Start the timer thread
+        self.timer_thread = threading.Thread(target=timer_thread_function, daemon=True)
+        self.timer_thread.start()
+    
+    def back_to_chat(self, e=None):
+        """Navigate back to the chat interface"""
+        # Stop the system metrics updates
+        if hasattr(self, 'timer_active'):
+            self.timer_active = False  # This will exit the timer thread loop
+        
+        # Restore the chat UI
+        self.main_content.controls = [
+            self.chat_area,
+            self.file_queue_row,
+            self.input_area,
+            self.status_area
+        ]
+        self.page.update()
+        
+    def open_settings(self, e=None):
+        """Open the settings page"""
+        # Create the settings page
+        settings_page = self.create_settings_page()
+        
+        # Replace main content with settings page
+        self.main_content.controls = [settings_page]
+        self.page.update()
+        
+    def get_disk_info(self, colors):
+        """Get formatted disk information for all drives"""
+        disk_info = []
+        try:
+            partitions = psutil.disk_partitions(all=False)
+            for partition in partitions:
+                if os.name == 'nt' and ('cdrom' in partition.opts or partition.fstype == ''):
+                    # Skip CD-ROM drives with no media
+                    continue
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    disk_info.append(ft.Text(
+                        f"Drive {partition.device} ({partition.mountpoint}): {partition.fstype}", 
+                        color=colors["text_primary"], 
+                        size=14, 
+                        weight=ft.FontWeight.W_500
+                    ))
+                    disk_info.append(ft.Text(
+                        f"  Total: {self.format_bytes(usage.total)}, Used: {self.format_bytes(usage.used)} ({usage.percent}%), Free: {self.format_bytes(usage.free)}", 
+                        color=colors["text_primary"], 
+                        size=14
+                    ))
+                except Exception:
+                    # Some drives may not be accessible
+                    disk_info.append(ft.Text(
+                        f"Drive {partition.device}: [Could not access drive]", 
+                        color=colors["text_secondary"], 
+                        size=14
+                    ))
+        except Exception as e:
+            disk_info.append(ft.Text(
+                f"Could not retrieve disk information: {str(e)}", 
+                color=colors["text_secondary"], 
+                size=14
+            ))
+        
+        # If no drives were found, add a message
+        if not disk_info:
+            disk_info.append(ft.Text(
+                "No drives found", 
+                color=colors["text_secondary"], 
+                size=14
+            ))
+            
+        return disk_info
+
+    def get_network_info(self, colors):
+        """Get formatted network information"""
+        network_info = []
+        
+        try:
+            # Get active network connections
+            net_if_addrs = psutil.net_if_addrs()
+            for interface_name, interface_addresses in net_if_addrs.items():
+                network_info.append(ft.Text(
+                    f"Interface: {interface_name}", 
+                    color=colors["text_primary"], 
+                    size=14,
+                    weight=ft.FontWeight.W_500
+                ))
+                
+                for address in interface_addresses:
+                    if address.family == socket.AF_INET:  # IPv4
+                        network_info.append(ft.Text(
+                            f"  IPv4: {address.address}, Netmask: {address.netmask}", 
+                            color=colors["text_primary"], 
+                            size=14
+                        ))
+                    elif address.family == socket.AF_INET6:  # IPv6
+                        network_info.append(ft.Text(
+                            f"  IPv6: {address.address}", 
+                            color=colors["text_primary"], 
+                            size=14
+                        ))
+                    elif address.family == psutil.AF_LINK:  # MAC
+                        network_info.append(ft.Text(
+                            f"  MAC: {address.address}", 
+                            color=colors["text_primary"], 
+                            size=14
+                        ))
+                
+                # Add a spacer between interfaces
+                network_info.append(ft.Container(height=5))
+        except Exception as e:
+            network_info.append(ft.Text(
+                f"Could not retrieve network information: {str(e)}", 
+                color=colors["text_secondary"], 
+                size=14
+            ))
+        
+        return network_info
+    
+    def create_chart(self, data, color):
+        """Create an animated line chart from data points"""
+        colors = self.settings.get_theme_colors()
+        
+        # Create data points for LineChart
+        data_points = []
+        for i, value in enumerate(data):
+            data_points.append(ft.LineChartDataPoint(x=i, y=value))
+        
+        # Create data series with the points
+        data_series = ft.LineChartData(
+            data_points=data_points,
+            stroke_width=3,
+            color=color,
+            curved=True,
+            stroke_cap_round=True,
+            below_line_bgcolor=ft.Colors.with_opacity(0.2, color),
+        )
+        
+        # Create the line chart with animation
+        chart = ft.LineChart(
+            data_series=[data_series],
+            border=ft.border.all(1, colors["border"]),
+            horizontal_grid_lines=ft.ChartGridLines(interval=25, color=colors["border"], width=1),
+            vertical_grid_lines=ft.ChartGridLines(interval=15, color=colors["border"], width=0.5),
+            left_axis=ft.ChartAxis(labels=[ft.ChartAxisLabel(value=0, label=ft.Text("0%")), 
+                                           ft.ChartAxisLabel(value=100, label=ft.Text("100%"))]),
+            bottom_axis=None,  # Hide bottom axis
+            interactive=True,
+            min_y=0,
+            max_y=100,
+            min_x=0,
+            max_x=59,
+            tooltip_bgcolor=colors["bg_secondary"],
+            animate=1000,  # 1000ms animation duration
+            expand=True,
+        )
+        
+        return chart
+    
+    def update_system_metrics(self, e=None):
+        """Update the system metrics and charts"""
+        # Debug print to track if this is being called
+        current_time = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[{current_time}] update_system_metrics called")
+        
+        try:
+            # Check if timer is active and if we're on the system page - if not, don't update
+            if not hasattr(self, 'timer_active') or not self.timer_active:
+                print(f"[{current_time}] Timer not active, skipping update")
+                return
+            
+            # Check if the chart containers exist
+            if not hasattr(self, 'cpu_chart_container') or not hasattr(self, 'ram_chart_container'):
+                return
+            
+            # Get current CPU and RAM usage
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            ram_percent = psutil.virtual_memory().percent
+            
+            # Try to get GPU usage for all available GPUs
+            gpu_data = []
+            gpu_info_text = "No GPU"
+            
+            try:
+                gpus = GPUtil.getGPUs()
+                if gpus:
+                    # Collect data for each GPU
+                    for i, gpu in enumerate(gpus):
+                        gpu_percent = gpu.load * 100  # Convert to percentage
+                        gpu_memory = f"{gpu.memoryUsed:.1f}/{gpu.memoryTotal:.1f} MB"
+                        gpu_name = gpu.name
+                        gpu_data.append({
+                            'percent': gpu_percent,
+                            'memory': gpu_memory,
+                            'name': gpu_name
+                        })
+                    
+                    # Create GPU info text for status line
+                    if len(gpus) == 1:
+                        # Single GPU format
+                        gpu_info_text = f"GPU: {gpu_data[0]['percent']:.1f}% ({gpu_data[0]['name']})"
+                    else:
+                        # Multiple GPU format
+                        gpu_info_text = f"GPUs: {', '.join([f'{gpu['name']}: {gpu['percent']:.1f}%' for gpu in gpu_data[:2]])}"
+            except Exception as e:
+                print(f"Error getting GPU data: {str(e)}")
+            
+            # Update history data
+            if not hasattr(self, 'cpu_history'):
+                self.cpu_history = [0] * 59 + [cpu_percent]
+                self.ram_history = [0] * 59 + [ram_percent]
+                # GPU histories are initialized in open_system_page
+            else:
+                # Update CPU and RAM histories
+                self.cpu_history.pop(0)
+                self.cpu_history.append(cpu_percent)
+                self.ram_history.pop(0)
+                self.ram_history.append(ram_percent)
+                
+                # Update GPU histories
+                try:
+                    if hasattr(self, 'gpu_histories') and self.gpu_histories:
+                        # If we have GPU data from this update
+                        if gpu_data:
+                            # Update existing GPU histories
+                            for i, gpu_info in enumerate(gpu_data):
+                                if i < len(self.gpu_histories):
+                                    self.gpu_histories[i].pop(0)
+                                    self.gpu_histories[i].append(gpu_info['percent'])
+                        else:
+                            # No GPU data available, update with zeros
+                            for history in self.gpu_histories:
+                                history.pop(0)
+                                history.append(0)
+                except Exception as e:
+                    print(f"Error updating GPU history: {str(e)}")
+            
+            # Get memory usage in GB
+            ram_gb = psutil.virtual_memory().used / (1024**3)
+            ram_total = psutil.virtual_memory().total / (1024**3)
+            
+            # Get disk IO stats
+            try:
+                disk_io = psutil.disk_io_counters()
+                disk_read = disk_io.read_bytes / 1024 / 1024 if disk_io else 0  # MB
+                disk_write = disk_io.write_bytes / 1024 / 1024 if disk_io else 0  # MB
+            except:
+                disk_read = 0
+                disk_write = 0
+            
+            # Current timestamp
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            
+            # Update text (if it exists)
+            if hasattr(self, 'live_stats_text'):
+                stats_text = f"CPU: {cpu_percent:.1f}% | RAM: {ram_gb:.1f}/{ram_total:.1f} GB ({ram_percent:.1f}%) | {gpu_info_text} | Disk Read: {disk_read:.1f} MB | Disk Write: {disk_write:.1f} MB | Updated: {timestamp}"
+                if self.live_stats_text.value != stats_text:
+                    self.live_stats_text.value = stats_text
+                    try:
+                        self.live_stats_text.update()
+                    except:
+                        print("Could not update live stats text")
+            
+            # Update charts with new data
+            colors = self.settings.get_theme_colors()
+            
+            try:
+                # Rebuild CPU chart with new data
+                cpu_chart = self.create_chart(self.cpu_history, colors["accent"])
+                self.cpu_chart_container.content = cpu_chart
+                self.cpu_chart_container.update()
+                
+                # Rebuild RAM chart with new data
+                ram_chart = self.create_chart(self.ram_history, "#4CAF50")
+                self.ram_chart_container.content = ram_chart
+                self.ram_chart_container.update()
+                
+                # Rebuild GPU charts with new data
+                if hasattr(self, 'gpu_histories') and self.gpu_histories:
+                    # Create a column to hold all GPU charts
+                    gpu_charts_column = ft.Column(spacing=5)
+                    
+                    # Create a chart for each GPU
+                    gpu_colors = ["#FF9800", "#E91E63"]  # Orange and Pink for different GPUs
+                    for i in range(min(2, len(self.gpu_histories))):  # Limit to 2 GPUs for now
+                        if i < len(self.gpu_names):
+                            gpu_label = ft.Text(f"{self.gpu_names[i]}", 
+                                               size=14, 
+                                               weight=ft.FontWeight.W_500, 
+                                               color=colors["text_primary"])
+                            gpu_charts_column.controls.append(gpu_label)
+                        
+                        gpu_chart = self.create_chart(self.gpu_histories[i], gpu_colors[i % len(gpu_colors)])
+                        gpu_charts_column.controls.append(gpu_chart)
+                    
+                    self.gpu_chart_container.content = gpu_charts_column
+                    self.gpu_chart_container.update()
+            except Exception as chart_error:
+                print(f"Error updating charts: {str(chart_error)}")
+                
+            # Force refresh of the page
+            self.page.update()
+                
+        except Exception as e:
+            # If there's an error, just log it
+            print(f"Error in update_system_metrics: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+    
+    def update_live_stats_text(self):
+        """Update the live stats text with current values"""
+        try:
+            # Get current stats
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            ram = psutil.virtual_memory()
+            ram_used_gb = round(ram.used / (1024**3), 1)
+            ram_total_gb = round(ram.total / (1024**3), 1)
+            ram_percent = ram.percent
+            
+            # Get disk IO stats
+            disk_io = psutil.disk_io_counters()
+            read_mb = round(disk_io.read_bytes / (1024**2), 1) if disk_io else 0
+            write_mb = round(disk_io.write_bytes / (1024**2), 1) if disk_io else 0
+            
+            # Format as text
+            current_time = datetime.datetime.now().strftime("%H:%M:%S")
+            stats_text = f"CPU: {cpu_percent}% | RAM: {ram_used_gb} GB / {ram_total_gb} GB ({ram_percent}%) | Disk Read: {read_mb} MB | Disk Write: {write_mb} MB | Updated: {current_time}"
+            
+            # Update the text control
+            self.live_stats_text.value = stats_text
+            self.live_stats_text.update()
+        except Exception as e:
+            self.live_stats_text.value = f"Error updating stats: {str(e)}"
+            self.live_stats_text.update()
+    
     def create_save_button(self, colors):
         """Create the save button and store reference for state control"""
         # Create button with initial state

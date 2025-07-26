@@ -10,3 +10,4 @@ replicate
 pyautogui
 mss
 pillow
+GPUtil
