@@ -11,3 +11,4 @@ pyautogui
 mss
 pillow
 GPUtil
+libmagic
