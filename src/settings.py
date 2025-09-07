@@ -34,6 +34,12 @@ class SettingsManager:
             },
             "api_keys": {
                 "replicate_api_key": ""
+            },
+            "mcp": {
+                "enabled": False,
+                "servers": [
+                    # Each server: {"name": str, "url": str, "api_key": str}
+                ]
             }
         }
         

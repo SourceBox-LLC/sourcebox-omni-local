@@ -31,6 +31,8 @@ from ollama import chat, ChatResponse
 import datetime
 import platform
 from settings import SettingsManager
+import urllib.request
+import urllib.error
 
 # Add project root directory to path to import agent tools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -761,6 +763,9 @@ class OllamaAgentGUI:
                 
                 # API Keys Configuration Section
                 self.create_api_keys_section(colors),
+                
+                # MCP (Model Context Protocol) Section
+                self.create_mcp_section(colors),
                 
                 # About Section
                 ft.Container(
@@ -1685,6 +1690,227 @@ class OllamaAgentGUI:
             border_radius=10,
             border=ft.border.all(1, colors["border"])
         )
+    
+    def create_mcp_section(self, colors):
+        """Create the MCP (Model Context Protocol) configuration section"""
+        # Read current MCP settings
+        mcp_enabled = self.settings.get("mcp", "enabled") or False
+        servers = self.settings.get("mcp", "servers") or []
+
+        # Controls: enable switch and add-server fields
+        self.mcp_enabled_switch = ft.Switch(
+            value=mcp_enabled,
+            label="Enable MCP integration",
+            on_change=self.on_mcp_toggle,
+            active_color=colors["accent"],
+        )
+
+        self.mcp_name_field = ft.TextField(
+            label="Server Name",
+            hint_text="e.g., Local MCP",
+            width=180,
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            border_color=colors["border"],
+            focused_border_color=colors["accent"],
+            label_style=ft.TextStyle(color=colors["text_secondary"]),
+            hint_style=ft.TextStyle(color=colors["text_secondary"]),
+        )
+
+        self.mcp_url_field = ft.TextField(
+            label="Server URL",
+            hint_text="http://localhost:4000",
+            width=260,
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            border_color=colors["border"],
+            focused_border_color=colors["accent"],
+            label_style=ft.TextStyle(color=colors["text_secondary"]),
+            hint_style=ft.TextStyle(color=colors["text_secondary"]),
+        )
+
+        self.mcp_api_key_field = ft.TextField(
+            label="API Key (optional)",
+            hint_text="If your MCP server requires it",
+            password=True,
+            can_reveal_password=True,
+            width=240,
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            border_color=colors["border"],
+            focused_border_color=colors["accent"],
+            label_style=ft.TextStyle(color=colors["text_secondary"]),
+            hint_style=ft.TextStyle(color=colors["text_secondary"]),
+        )
+
+        add_button = ft.ElevatedButton(
+            "Add Server",
+            icon=ft.Icons.ADD_CIRCLE_OUTLINE,
+            on_click=self.on_add_mcp_server,
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8)),
+        )
+
+        # Server list UI
+        server_rows = []
+        if servers:
+            for i, srv in enumerate(servers):
+                name = srv.get("name", f"Server {i+1}")
+                url = srv.get("url", "")
+                server_rows.append(
+                    ft.Container(
+                        content=ft.Row([
+                            ft.Column([
+                                ft.Text(name, size=14, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+                                ft.Text(url, size=12, color=colors["text_secondary"]),
+                            ], expand=True, spacing=2),
+                            ft.TextButton(
+                                "Test",
+                                icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
+                                on_click=(lambda e, idx=i: self.test_mcp_server(idx)),
+                                style=ft.ButtonStyle(color={ft.MaterialState.DEFAULT: colors["accent"]}),
+                            ),
+                            ft.TextButton(
+                                "Remove",
+                                icon=ft.Icons.DELETE_OUTLINE,
+                                on_click=(lambda e, idx=i: self.on_remove_mcp_server(idx)),
+                                style=ft.ButtonStyle(color={ft.MaterialState.DEFAULT: "#ff6666"}),
+                            ),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                        padding=ft.padding.symmetric(vertical=8, horizontal=10),
+                        bgcolor=colors["bg_tertiary"],
+                        border_radius=6,
+                    )
+                )
+        else:
+            server_rows.append(
+                ft.Text("No MCP servers added yet.", size=12, color=colors["text_secondary"]) 
+            )
+
+        content_items = [
+            ft.Text("🧩 MCP Integration (experimental)", size=18, weight=ft.FontWeight.W_500, color=colors["accent"]),
+            ft.Divider(color=colors["border"], height=1),
+            ft.Text(
+                "Model Context Protocol allows connecting external servers that provide additional tools and capabilities.",
+                size=12,
+                color=colors["text_secondary"],
+            ),
+            ft.Row([self.mcp_enabled_switch]),
+            ft.Container(height=6),
+            ft.Text("Add MCP Server", size=14, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+            ft.Row([
+                self.mcp_name_field,
+                self.mcp_url_field,
+                self.mcp_api_key_field,
+                add_button,
+            ], wrap=True, spacing=10, run_spacing=10),
+            ft.Container(height=6),
+            ft.Text("Configured Servers", size=14, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
+            ft.Column(server_rows, spacing=8),
+        ]
+
+        return ft.Container(
+            content=ft.Column(content_items, spacing=10),
+            padding=ft.padding.all(20),
+            margin=ft.margin.all(10),
+            bgcolor=colors["bg_secondary"],
+            border_radius=10,
+            border=ft.border.all(1, colors["border"]),
+        )
+
+    def on_mcp_toggle(self, e):
+        """Enable/disable MCP and persist setting."""
+        try:
+            enabled = bool(e.control.value)
+            self.settings.set("mcp", "enabled", enabled)
+            self.settings_changed = True
+            self.update_save_button_visibility()
+            status = "enabled" if enabled else "disabled"
+            self.update_status(f"MCP {status}")
+        except Exception as ex:
+            print(f"Error updating MCP toggle: {ex}")
+
+    def on_add_mcp_server(self, e):
+        """Add a new MCP server from input fields."""
+        name = (self.mcp_name_field.value or "").strip()
+        url = (self.mcp_url_field.value or "").strip()
+        api_key = (self.mcp_api_key_field.value or "").strip()
+
+        if not name or not url:
+            self.update_status("Please provide both a server name and URL", color="#ffaa00")
+            return
+        if not (url.startswith("http://") or url.startswith("https://")):
+            self.update_status("Server URL must start with http:// or https://", color="#ffaa00")
+            return
+
+        try:
+            servers = self.settings.get("mcp", "servers") or []
+            # Prevent duplicates by URL
+            if any((s.get("url") == url) for s in servers):
+                self.update_status("That server is already in your list", color="#ffaa00")
+                return
+
+            servers.append({"name": name, "url": url, "api_key": api_key})
+            # Persist
+            self.settings.set("mcp", "servers", servers)
+            self.settings_changed = True
+            self.update_save_button_visibility()
+
+            # Clear fields for convenience
+            self.mcp_name_field.value = ""
+            self.mcp_url_field.value = ""
+            self.mcp_api_key_field.value = ""
+            self.page.update()
+
+            # Re-open settings to refresh the list
+            self.open_settings(None)
+            self.update_status("MCP server added", color="#00ff88")
+        except Exception as ex:
+            print(f"Error adding MCP server: {ex}")
+            self.update_status("Failed to add server", color="#ff6666")
+
+    def on_remove_mcp_server(self, server_index: int):
+        """Remove an MCP server by index and refresh UI."""
+        try:
+            servers = self.settings.get("mcp", "servers") or []
+            if 0 <= server_index < len(servers):
+                removed = servers.pop(server_index)
+                self.settings.set("mcp", "servers", servers)
+                self.settings_changed = True
+                self.update_save_button_visibility()
+                self.open_settings(None)
+                self.update_status(f"Removed server '{removed.get('name','Server')}'" , color="#ffaa00")
+        except Exception as ex:
+            print(f"Error removing MCP server: {ex}")
+            self.update_status("Failed to remove server", color="#ff6666")
+
+    def test_mcp_server(self, server_index: int):
+        """Attempt to connect to the MCP server URL (simple reachability test)."""
+        servers = self.settings.get("mcp", "servers") or []
+        if not (0 <= server_index < len(servers)):
+            self.update_status("Invalid server index", color="#ff6666")
+            return
+        srv = servers[server_index]
+        url = srv.get("url", "")
+        name = srv.get("name", f"Server {server_index+1}")
+
+        if not url:
+            self.update_status("Server URL missing", color="#ff6666")
+            return
+
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                code = resp.getcode()
+                if 200 <= code < 400:
+                    self.update_status(f"✅ MCP server '{name}' is reachable ({code})", color="#00ff88")
+                else:
+                    self.update_status(f"⚠️ MCP server responded with status {code}", color="#ffaa00")
+        except urllib.error.URLError as ex:
+            self.update_status(f"❌ Can't reach MCP server: {ex.reason}", color="#ff6666")
+        except Exception as ex:
+            self.update_status(f"❌ MCP test failed: {str(ex)[:60]}...", color="#ff6666")
     
     def on_api_key_change(self, e):
         """Handle API key field changes"""
