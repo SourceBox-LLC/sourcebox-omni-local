@@ -11,4 +11,6 @@ pyautogui
 mss
 pillow
 GPUtil
+mcp
+httpx-sse
 libmagic

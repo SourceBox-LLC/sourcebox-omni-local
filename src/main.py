@@ -33,6 +33,17 @@ import platform
 from settings import SettingsManager
 import urllib.request
 import urllib.error
+import shlex
+import types as pytypes
+
+# Optional MCP client
+try:
+    from mcp.client.stdio import stdio_client, StdioServerParameters
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.session import ClientSession
+    MCP_AVAILABLE = True
+except Exception:
+    MCP_AVAILABLE = False
 
 # Add project root directory to path to import agent tools
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -224,6 +235,12 @@ class OllamaAgentGUI:
                      self.set_timer_wrapper,
                      # Image description tool
                      self.describe_image_wrapper]
+        # MCP runtime state
+        self.mcp_wrapper_names = []  # legacy placeholder; keep for safety
+        self.mcp_tool_names: list[str] = []  # discovered tool names from server
+        self.mcp_server_conf: dict | None = None
+        self.mcp_announce_done: bool = False
+
         self.setup_page()
         self.setup_system_message()
         self.create_ui()
@@ -314,11 +331,6 @@ class OllamaAgentGUI:
             "IMPORTANT NOTE: close_apps and close_app_by_name_wrapper are different tools.\n" +
             "close_apps is the original simple tool, while close_app_by_name_wrapper provides detailed process information and better control.\n" +
             "SIMPLE WAY TO REMEMBER: DETAILED PROCESS CONTROL = close_app_by_name_wrapper, SIMPLE CLOSE = close_apps\n\n"
-            
-
-
-            
-
         )
         self.messages = [{"role": "system", "content": system_msg}]
        
@@ -1715,6 +1727,20 @@ class OllamaAgentGUI:
             focused_border_color=colors["accent"],
             label_style=ft.TextStyle(color=colors["text_secondary"]),
             hint_style=ft.TextStyle(color=colors["text_secondary"]),
+            on_submit=self.on_add_mcp_server,
+        )
+
+        # Server type selector (HTTP vs STDIO)
+        self.mcp_type_field = ft.Dropdown(
+            label="Server Type",
+            value="HTTP",
+            width=140,
+            options=[ft.dropdown.Option("HTTP"), ft.dropdown.Option("STDIO")],
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            border_color=colors["border"],
+            focused_border_color=colors["accent"],
+            label_style=ft.TextStyle(color=colors["text_secondary"]),
         )
 
         self.mcp_url_field = ft.TextField(
@@ -1727,6 +1753,34 @@ class OllamaAgentGUI:
             focused_border_color=colors["accent"],
             label_style=ft.TextStyle(color=colors["text_secondary"]),
             hint_style=ft.TextStyle(color=colors["text_secondary"]),
+            on_submit=self.on_add_mcp_server,
+        )
+
+        # STDIO command and args
+        self.mcp_cmd_field = ft.TextField(
+            label="Command (STDIO)",
+            hint_text="Path to python.exe or server binary",
+            width=260,
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            border_color=colors["border"],
+            focused_border_color=colors["accent"],
+            label_style=ft.TextStyle(color=colors["text_secondary"]),
+            hint_style=ft.TextStyle(color=colors["text_secondary"]),
+            on_submit=self.on_add_mcp_server,
+        )
+
+        self.mcp_args_field = ft.TextField(
+            label="Args (STDIO)",
+            hint_text="e.g., dummy_mcp_server\\server.py",
+            width=260,
+            bgcolor=colors["bg_tertiary"],
+            color=colors["text_primary"],
+            border_color=colors["border"],
+            focused_border_color=colors["accent"],
+            label_style=ft.TextStyle(color=colors["text_secondary"]),
+            hint_style=ft.TextStyle(color=colors["text_secondary"]),
+            on_submit=self.on_add_mcp_server,
         )
 
         self.mcp_api_key_field = ft.TextField(
@@ -1741,6 +1795,7 @@ class OllamaAgentGUI:
             focused_border_color=colors["accent"],
             label_style=ft.TextStyle(color=colors["text_secondary"]),
             hint_style=ft.TextStyle(color=colors["text_secondary"]),
+            on_submit=self.on_add_mcp_server,
         )
 
         add_button = ft.ElevatedButton(
@@ -1757,25 +1812,31 @@ class OllamaAgentGUI:
         if servers:
             for i, srv in enumerate(servers):
                 name = srv.get("name", f"Server {i+1}")
+                stype = (srv.get("type") or ("STDIO" if srv.get("command") else "HTTP")).upper()
                 url = srv.get("url", "")
+                cmd = srv.get("command", "")
+                args = srv.get("args", [])
+                detail = (
+                    url if stype == "HTTP" else f"{cmd} {' '.join(args) if isinstance(args, list) else str(args)}"
+                )
                 server_rows.append(
                     ft.Container(
                         content=ft.Row([
                             ft.Column([
                                 ft.Text(name, size=14, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
-                                ft.Text(url, size=12, color=colors["text_secondary"]),
+                                ft.Text(f"{stype} • {detail}", size=12, color=colors["text_secondary"]),
                             ], expand=True, spacing=2),
                             ft.TextButton(
                                 "Test",
                                 icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
                                 on_click=(lambda e, idx=i: self.test_mcp_server(idx)),
-                                style=ft.ButtonStyle(color={ft.MaterialState.DEFAULT: colors["accent"]}),
+                                style=ft.ButtonStyle(color=colors["accent"]),
                             ),
                             ft.TextButton(
                                 "Remove",
                                 icon=ft.Icons.DELETE_OUTLINE,
                                 on_click=(lambda e, idx=i: self.on_remove_mcp_server(idx)),
-                                style=ft.ButtonStyle(color={ft.MaterialState.DEFAULT: "#ff6666"}),
+                                style=ft.ButtonStyle(color="#ff6666"),
                             ),
                         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                         padding=ft.padding.symmetric(vertical=8, horizontal=10),
@@ -1801,14 +1862,28 @@ class OllamaAgentGUI:
             ft.Text("Add MCP Server", size=14, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
             ft.Row([
                 self.mcp_name_field,
+                self.mcp_type_field,
                 self.mcp_url_field,
+                self.mcp_cmd_field,
+                self.mcp_args_field,
                 self.mcp_api_key_field,
                 add_button,
             ], wrap=True, spacing=10, run_spacing=10),
             ft.Container(height=6),
             ft.Text("Configured Servers", size=14, weight=ft.FontWeight.W_500, color=colors["text_primary"]),
             ft.Column(server_rows, spacing=8),
+            # Inline status line for MCP actions
+            ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.INFO_OUTLINE, size=14, color=colors["text_secondary"]),
+                    ft.Text("", size=12, color=colors["text_secondary"])
+                ], spacing=8),
+                padding=ft.padding.only(top=8)
+            )
         ]
+        # Keep reference to the status Text so we can update it later
+        # The Text is the second control in the last Row above
+        self.mcp_status_text = content_items[-1].content.controls[1]
 
         return ft.Container(
             content=ft.Column(content_items, spacing=10),
@@ -1827,31 +1902,65 @@ class OllamaAgentGUI:
             self.settings_changed = True
             self.update_save_button_visibility()
             status = "enabled" if enabled else "disabled"
-            self.update_status(f"MCP {status}")
+            self._set_mcp_status(f"MCP {status}", color="#00d4ff")
+            # Kick off discovery when enabling
+            if enabled:
+                threading.Thread(target=self.try_attach_mcp_tools, daemon=True).start()
         except Exception as ex:
             print(f"Error updating MCP toggle: {ex}")
 
     def on_add_mcp_server(self, e):
-        """Add a new MCP server from input fields."""
+        """Add a new MCP server from input fields (HTTP or STDIO)."""
         name = (self.mcp_name_field.value or "").strip()
+        stype = (self.mcp_type_field.value or "HTTP").strip().upper()
         url = (self.mcp_url_field.value or "").strip()
+        cmd = (self.mcp_cmd_field.value or "").strip()
+        args_str = (self.mcp_args_field.value or "").strip()
         api_key = (self.mcp_api_key_field.value or "").strip()
 
-        if not name or not url:
-            self.update_status("Please provide both a server name and URL", color="#ffaa00")
+        if not name:
+            self.update_status("Please provide a server name", color="#ffaa00")
             return
-        if not (url.startswith("http://") or url.startswith("https://")):
-            self.update_status("Server URL must start with http:// or https://", color="#ffaa00")
-            return
+
+        server_entry = {"name": name, "type": stype}
+
+        if stype == "HTTP":
+            if not url:
+                self.update_status("Please provide a server URL", color="#ffaa00")
+                return
+            if not (url.startswith("http://") or url.startswith("https://")):
+                self.update_status("Server URL must start with http:// or https://", color="#ffaa00")
+                return
+            server_entry.update({"url": url, "api_key": api_key})
+        else:  # STDIO
+            if not cmd:
+                self.update_status("Please provide a command for STDIO server", color="#ffaa00")
+                return
+            # Sanitize command (strip surrounding quotes)
+            cmd_clean = cmd.strip().strip('"').strip("'")
+            # Parse args string into list (Windows-friendly)
+            # posix=False avoids backslash-escape issues on Windows paths; then strip any surrounding quotes per token
+            args_list = shlex.split(args_str, posix=False) if args_str else []
+            args_list = [a.strip().strip('"').strip("'") for a in args_list]
+            server_entry.update({"command": cmd_clean, "args": args_list, "api_key": api_key})
 
         try:
             servers = self.settings.get("mcp", "servers") or []
-            # Prevent duplicates by URL
-            if any((s.get("url") == url) for s in servers):
+            # Prevent duplicates: use (type,url) for HTTP or (type,command,args) for STDIO
+            def is_duplicate(existing):
+                if existing.get("type", "HTTP").upper() != stype:
+                    return False
+                if stype == "HTTP":
+                    return existing.get("url") == server_entry.get("url")
+                return existing.get("command") == server_entry.get("command") and (
+                    (existing.get("args") or []) == (server_entry.get("args") or [])
+                )
+
+            if any(is_duplicate(s) for s in servers):
                 self.update_status("That server is already in your list", color="#ffaa00")
                 return
 
-            servers.append({"name": name, "url": url, "api_key": api_key})
+            servers.append(server_entry)
             # Persist
             self.settings.set("mcp", "servers", servers)
             self.settings_changed = True
@@ -1860,15 +1969,19 @@ class OllamaAgentGUI:
             # Clear fields for convenience
             self.mcp_name_field.value = ""
             self.mcp_url_field.value = ""
+            self.mcp_cmd_field.value = ""
+            self.mcp_args_field.value = ""
             self.mcp_api_key_field.value = ""
             self.page.update()
 
             # Re-open settings to refresh the list
             self.open_settings(None)
-            self.update_status("MCP server added", color="#00ff88")
+            self._set_mcp_status("MCP server added", color="#00ff88")
+            # Attempt discovery immediately
+            threading.Thread(target=self.try_attach_mcp_tools, daemon=True).start()
         except Exception as ex:
             print(f"Error adding MCP server: {ex}")
-            self.update_status("Failed to add server", color="#ff6666")
+            self._set_mcp_status("Failed to add server", color="#ff6666")
 
     def on_remove_mcp_server(self, server_index: int):
         """Remove an MCP server by index and refresh UI."""
@@ -1880,37 +1993,181 @@ class OllamaAgentGUI:
                 self.settings_changed = True
                 self.update_save_button_visibility()
                 self.open_settings(None)
-                self.update_status(f"Removed server '{removed.get('name','Server')}'" , color="#ffaa00")
+                self._set_mcp_status(f"Removed server '{removed.get('name','Server')}'" , color="#ffaa00")
         except Exception as ex:
             print(f"Error removing MCP server: {ex}")
-            self.update_status("Failed to remove server", color="#ff6666")
+            self._set_mcp_status("Failed to remove server", color="#ff6666")
 
     def test_mcp_server(self, server_index: int):
-        """Attempt to connect to the MCP server URL (simple reachability test)."""
+        """Test MCP server connectivity.
+        - HTTP: simple GET
+        - STDIO: spawn process, initialize session, list tools
+        """
         servers = self.settings.get("mcp", "servers") or []
         if not (0 <= server_index < len(servers)):
             self.update_status("Invalid server index", color="#ff6666")
             return
         srv = servers[server_index]
-        url = srv.get("url", "")
         name = srv.get("name", f"Server {server_index+1}")
+        stype = (srv.get("type") or ("STDIO" if srv.get("command") else "HTTP")).upper()
 
-        if not url:
-            self.update_status("Server URL missing", color="#ff6666")
+        if stype == "HTTP":
+            url = srv.get("url", "")
+            if not url:
+                self._set_mcp_status("Server URL missing", color="#ff6666")
+                return
+            try:
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    code = resp.getcode()
+                    if 200 <= code < 400:
+                        self._set_mcp_status(f"✅ MCP server '{name}' is reachable ({code})", color="#00ff88")
+                        # If possible, perform a lightweight MCP handshake over HTTP and list tools.
+                        if MCP_AVAILABLE:
+                            def http_probe():
+                                import asyncio
+                                # Derive API endpoint: if URL ends with /healthz, replace with /mcp; otherwise append /mcp
+                                base = url
+                                norm = base.rstrip("/")
+                                if norm.endswith("/healthz"):
+                                    api = norm[: -len("/healthz")] + "/mcp"
+                                else:
+                                    api = norm + "/mcp"
+                                try:
+                                    async def do_http_test():
+                                        async with streamablehttp_client(api, terminate_on_close=True) as (read, write, get_session_id):
+                                            session = ClientSession(read, write)
+                                            await session.initialize()
+                                            tools = await session.list_tools()
+                                            return tools
+                                    tools_obj = asyncio.run(asyncio.wait_for(do_http_test(), timeout=10))
+                                    try:
+                                        # Attach wrappers immediately so chat can use them
+                                        if tools_obj:
+                                            self._attach_mcp_wrappers(srv, tools_obj)
+                                        names = ", ".join([t.name for t in tools_obj.tools]) if getattr(tools_obj, 'tools', None) else "none"
+                                        self._set_mcp_status(f"🔌 HTTP MCP handshake OK. Tools: {names}", color="#00ff88")
+                                    except Exception as attach_ex:
+                                        self._set_mcp_status(f"ℹ️ MCP OK but attach failed: {str(attach_ex)[:120]}...", color="#ffaa00")
+                                except Exception as ex:
+                                    self._set_mcp_status(f"ℹ️ HTTP reachable, MCP handshake skipped: {str(ex)[:120]}...", color="#ffaa00")
+                            threading.Thread(target=http_probe, daemon=True).start()
+                    else:
+                        self._set_mcp_status(f"⚠️ MCP server responded with status {code}", color="#ffaa00")
+            except urllib.error.URLError as ex:
+                self._set_mcp_status(f"❌ Can't reach MCP server: {ex.reason}", color="#ff6666")
+            except Exception as ex:
+                self._set_mcp_status(f"❌ MCP test failed: {str(ex)[:60]}...", color="#ff6666")
             return
 
-        try:
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                code = resp.getcode()
-                if 200 <= code < 400:
-                    self.update_status(f"✅ MCP server '{name}' is reachable ({code})", color="#00ff88")
+        # STDIO path
+        if not MCP_AVAILABLE:
+            self._set_mcp_status("Install 'mcp' package to enable STDIO MCP (pip install mcp)", color="#ffaa00")
+            return
+        # Sanitize potentially quoted values from stored settings
+        cmd = (srv.get("command") or "").strip().strip('"').strip("'")
+        args = [(str(a).strip().strip('"').strip("'")) for a in (srv.get("args") or [])]
+        # Show immediate feedback
+        self._set_mcp_status("Testing STDIO server...", color="#00d4ff")
+        
+        def runner():
+            import tempfile, os
+            err_path = None
+            try:
+                # Pre-flight checks
+                import shutil as _shutil
+                if not cmd:
+                    self._set_mcp_status("❌ Command is empty", color="#ff6666")
+                    return
+                cmd_exists = os.path.isabs(cmd) and os.path.exists(cmd)
+                cmd_in_path = _shutil.which(cmd) is not None
+                if not (cmd_exists or cmd_in_path):
+                    self._set_mcp_status(f"❌ Command not found: {cmd}", color="#ff6666")
+                    return
+                async def _do_test():
+                    # Capture server stderr for diagnostics
+                    nonlocal err_path
+                    err_f = tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8", delete=False)
+                    err_path = err_f.name
+                    try:
+                        # Best-effort working directory: find first absolute existing path in args
+                        cwd = None
+                        script_path = None
+                        for tok in args:
+                            if os.path.isabs(tok) and os.path.exists(tok):
+                                script_path = tok
+                                cwd = os.path.dirname(tok)
+                                break
+                        # Unbuffered IO and verbose logging from the server
+                        env = {"PYTHONUNBUFFERED": "1", "DUMMY_MCP_LOG_LEVEL": "DEBUG"}
+                        params = StdioServerParameters(command=cmd, args=list(args), cwd=cwd, env=env)
+                        async with stdio_client(params, errlog=err_f) as (read, write):
+                            launch_arg = script_path or (args[0] if args else "")
+                            self._set_mcp_status(f"Launching: {cmd} {launch_arg}", color="#00d4ff")
+                            session = ClientSession(read, write)
+                            await session.initialize()
+                            tools = await session.list_tools()
+                            tool_names = ", ".join([t.name for t in tools.tools]) if getattr(tools, 'tools', None) else "none"
+                            self._set_mcp_status(f"✅ STDIO MCP '{name}' connected. Tools: {tool_names}", color="#00ff88")
+                            try:
+                                # Attach wrappers immediately so chat can use them
+                                self._attach_mcp_wrappers(srv, tools)
+                            except Exception as attach_ex:
+                                self._set_mcp_status(f"ℹ️ MCP OK but attach failed: {str(attach_ex)[:120]}...", color="#ffaa00")
+                    finally:
+                        try:
+                            err_f.flush()
+                            err_f.close()
+                        except Exception:
+                            pass
+
+                # Enforce timeout so UI doesn't hang forever
+                asyncio.run(asyncio.wait_for(_do_test(), timeout=15))
+            except BaseException as ex:
+                # Try to surface server stderr if available
+                tail = ""
+                try:
+                    if err_path and os.path.exists(err_path):
+                        with open(err_path, "r", encoding="utf-8", errors="ignore") as f:
+                            data = f.read()[-500:]
+                            if data:
+                                tail = f"\nServer stderr (last 500 chars):\n{data}"
+                except Exception:
+                    pass
+                # Expand nested errors (e.g., ExceptionGroup) for clarity
+                msg = str(ex)
+                try:
+                    import traceback as _tb
+                    eg_details = ""
+                    if hasattr(ex, 'exceptions') and isinstance(getattr(ex, 'exceptions'), (list, tuple)):
+                        for i, sub in enumerate(ex.exceptions):
+                            eg_details += f"\n  [{i+1}] {type(sub).__name__}: {sub}"
+                    if eg_details:
+                        msg = f"{msg}{eg_details}"
+                except Exception:
+                    pass
+                if isinstance(ex, TimeoutError) or "Timeout" in msg:
+                    self._set_mcp_status(f"❌ STDIO MCP test timed out after 15s. Verify Command & Args.{tail}", color="#ff6666")
                 else:
-                    self.update_status(f"⚠️ MCP server responded with status {code}", color="#ffaa00")
-        except urllib.error.URLError as ex:
-            self.update_status(f"❌ Can't reach MCP server: {ex.reason}", color="#ff6666")
-        except Exception as ex:
-            self.update_status(f"❌ MCP test failed: {str(ex)[:60]}...", color="#ff6666")
+                    self._set_mcp_status(f"❌ STDIO MCP test failed: {msg[:200]}...{tail}", color="#ff6666")
+        
+        t = threading.Thread(target=runner, daemon=True)
+        t.start()
+
+    def _set_mcp_status(self, message: str, color: str = None):
+        """Update the inline MCP status text in settings, or fall back to global status."""
+        try:
+            if hasattr(self, "mcp_status_text") and self.mcp_status_text is not None:
+                if color:
+                    self.mcp_status_text.color = color
+                self.mcp_status_text.value = message
+                self.page.update()
+            else:
+                # Fall back to global status bar
+                self.update_status(message, color or "#00d4ff")
+        except Exception:
+            # As a last resort, print
+            print(message)
     
     def on_api_key_change(self, e):
         """Handle API key field changes"""
@@ -2236,6 +2493,10 @@ class OllamaAgentGUI:
             margin=ft.margin.only(bottom=20)
         )
         self.chat_container.controls.append(system_msg)
+        try:
+            self.page.update()
+        except Exception:
+            pass
         
     def update_status(self, status: str, color: str = "#00d4ff"):
         """Update the status text"""
@@ -2275,6 +2536,14 @@ class OllamaAgentGUI:
         
         # Restore file queue display if files are uploaded
         self.restore_file_queue_on_navigation()
+        # Proactively attach MCP wrappers if enabled so the agent can use them immediately
+        try:
+            threading.Thread(target=self.try_attach_mcp_tools, daemon=True).start()
+            # If MCP already discovered but not announced, announce now
+            if getattr(self, "mcp_tool_names", []) and not getattr(self, "mcp_announce_done", False):
+                self._announce_mcp_tools()
+        except Exception:
+            pass
         
         self.page.update()
         
@@ -2572,7 +2841,13 @@ class OllamaAgentGUI:
             tools_settings = self.settings.get("tools")
             print(f"Tools settings from file: {tools_settings}")
             
-            # Get available tools based on settings
+            # Make sure any MCP tools are dynamically attached if enabled and available
+            try:
+                self.try_attach_mcp_tools()
+            except Exception as _mcp_attach_err:
+                print(f"MCP attach warning: {_mcp_attach_err}")
+
+            # Get available tools based on settings (now includes any mcp_* wrappers)
             available_tools = self.get_enabled_tools()
             
             # Get response from Ollama with tools
@@ -3062,8 +3337,20 @@ class OllamaAgentGUI:
             "set_timer_wrapper": "timer_tool",  # Timer tool
             "describe_image_wrapper": "image_description",  # Image description tool
         }
-        
+
         # Default to disabled for tools without specific settings (security first)
+        if tool_name == "mcp_call":
+            mcp_enabled = bool(self.settings.get("mcp", "enabled"))
+            # Allow if we either discovered tools OR at least have a configured server
+            available = bool(getattr(self, "mcp_tool_names", [])) or bool(getattr(self, "mcp_server_conf", None))
+            print(f"Debug: MCP tool 'mcp_call' enabled={mcp_enabled and available}")
+            return mcp_enabled and available
+        if tool_name.startswith("mcp_"):
+            # Dynamically enabled only when MCP is enabled and this wrapper was discovered
+            mcp_enabled = bool(self.settings.get("mcp", "enabled"))
+            discovered = tool_name in getattr(self, "mcp_wrapper_names", [])
+            print(f"Debug: MCP tool '{tool_name}' enabled={mcp_enabled and discovered}")
+            return mcp_enabled and discovered
         if tool_name not in tool_to_setting:
             print(f"Warning: Tool '{tool_name}' not mapped to any setting, defaulting to disabled")
             return False
@@ -3087,6 +3374,350 @@ class OllamaAgentGUI:
                 
         print(f"Debug: {len(enabled_tools)} tools enabled out of {len(self.tools)} total")
         return enabled_tools
+
+    # ====================== MCP Dynamic Integration ======================
+    def try_attach_mcp_tools(self):
+        """Discover and expose MCP tools as dynamic wrappers if MCP is enabled and a server is configured.
+        - No hardcoding: discards wrappers when MCP is disabled or no server.
+        - Safe: requires 'mcp' package present; otherwise it is a no-op.
+        """
+        try:
+            if not MCP_AVAILABLE:
+                return
+            if not self.settings.get("mcp", "enabled"):
+                self._detach_mcp_wrappers()
+                return
+            servers = self.settings.get("mcp", "servers") or []
+            if not servers:
+                self._detach_mcp_wrappers()
+                return
+
+            # Choose the first configured server for now.
+            srv = servers[0]
+            if not getattr(self, "mcp_wrapper_names", []) and not getattr(self, "mcp_tool_names", []):
+                tools = self._list_mcp_tools(srv)
+                if tools:
+                    self._attach_mcp_wrappers(srv, tools)
+                else:
+                    # Listing failed or returned empty: still expose generic mcp_call so the model can use it
+                    self.mcp_server_conf = srv
+                    self._ensure_mcp_call_tool()
+                    if not self.mcp_announce_done:
+                        self.add_system_message(
+                            "ℹ️ MCP server configured. Tools could not be listed right now; you can still call tools using mcp_call(tool_name, arguments)."
+                        )
+        except Exception as ex:
+            print(f"try_attach_mcp_tools error: {ex}")
+            # Surface non-fatal problems to chat once so the user understands why MCP didn't appear
+            try:
+                self.add_system_message(f"⚠️ MCP attach issue: {str(ex)[:200]}")
+            except Exception:
+                pass
+
+    def _detach_mcp_wrappers(self):
+        names = getattr(self, "mcp_wrapper_names", [])
+        if not names:
+            names = []
+        # Remove per-tool wrappers if any
+        self.tools = [t for t in self.tools if t.__name__ not in names and t.__name__ != "mcp_call"]
+        for n in names:
+            if hasattr(self, n):
+                try:
+                    delattr(self, n)
+                except Exception:
+                    pass
+        # Remove mcp_call if present
+        if hasattr(self, "mcp_call"):
+            try:
+                delattr(self, "mcp_call")
+            except Exception:
+                pass
+        self.mcp_wrapper_names = []
+        self.mcp_tool_names = []
+        self.mcp_server_conf = None
+
+    def _normalize_wrapper_name(self, raw: str) -> str:
+        safe = []
+        for ch in raw:
+            if ch.isalnum():
+                safe.append(ch)
+            else:
+                safe.append("_")
+        # Collapse multiple underscores
+        name = "".join(safe)
+        while "__" in name:
+            name = name.replace("__", "_")
+        return f"mcp_{name.strip('_').lower()}"
+
+    def _attach_mcp_wrappers(self, srv: dict, tools_result) -> None:
+        """Create per-tool wrappers and also expose a generic mcp_call(tool_name, arguments)."""
+        tool_list = getattr(tools_result, "tools", None) or tools_result
+        discovered_names = []
+        wrapper_names = []
+        for tool in tool_list:
+            tname = getattr(tool, "name", None) or (tool.get("name") if isinstance(tool, dict) else None)
+            if not tname:
+                continue
+            discovered_names.append(tname)
+            wrapper = self._normalize_wrapper_name(tname)
+            if any(getattr(fn, "__name__", "") == wrapper for fn in self.tools):
+                wrapper_names.append(wrapper)
+                continue
+            # Build per-tool wrapper with explicit signature from schema
+            try:
+                fn = self._build_mcp_wrapper(srv, tool)
+                bound = pytypes.MethodType(fn, self)
+                setattr(self, wrapper, bound)
+                self.tools.append(getattr(self, wrapper))
+                wrapper_names.append(wrapper)
+            except Exception as ex:
+                print(f"Failed to build typed wrapper for MCP tool '{tname}': {ex}. Falling back to kwargs.")
+                def _fallback(self, **kwargs):
+                    return self._call_mcp_tool_once(srv, tname, kwargs)
+                _fallback.__name__ = wrapper
+                _fallback.__doc__ = f"Dynamic MCP tool wrapper for '{tname}' (fallback kwargs)."
+                setattr(self, wrapper, pytypes.MethodType(_fallback, self))
+                self.tools.append(getattr(self, wrapper))
+                wrapper_names.append(wrapper)
+
+        # Save discovery
+        self.mcp_tool_names = discovered_names
+        self.mcp_wrapper_names = wrapper_names
+        self.mcp_server_conf = srv
+        # Ensure generic call tool exists as well
+        self._ensure_mcp_call_tool()
+        self._announce_mcp_tools()
+
+    def _build_mcp_wrapper(self, srv: dict, tool_obj):
+        """Create a Python function object with explicit parameters derived from the tool's inputSchema.
+        Returns the function object (unbound). The function name is normalized to mcp_<tool>.
+        """
+        tname = getattr(tool_obj, "name", None) or (tool_obj.get("name") if isinstance(tool_obj, dict) else None)
+        if not tname:
+            raise ValueError("tool name missing")
+        wrapper_name = self._normalize_wrapper_name(tname)
+
+        # Get schema and description
+        schema = getattr(tool_obj, "inputSchema", None)
+        if schema is not None and hasattr(schema, "model_dump"):
+            schema = schema.model_dump()
+        desc = getattr(tool_obj, "description", None) or (tool_obj.get("description") if isinstance(tool_obj, dict) else "")
+        schema = schema or {}
+
+        # Build parameter list from schema
+        props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+        required = schema.get("required", []) if isinstance(schema, dict) else []
+        # Map JSON schema types to Python annotations
+        def py_type(json_t):
+            return {
+                "string": "str",
+                "number": "float",
+                "integer": "int",
+                "boolean": "bool",
+                "array": "list",
+                "object": "dict",
+            }.get(json_t, "object")
+
+        # Order required first, then optional
+        req_params = []
+        opt_params = []
+        for key, spec in props.items():
+            ann = py_type(spec.get("type")) if isinstance(spec, dict) else "object"
+            if key in required:
+                req_params.append(f"{key}: {ann}")
+            else:
+                opt_params.append(f"{key}: {ann} | None = None")
+        param_names = list(props.keys())
+        # Build source
+        if req_params or opt_params:
+            param_sig = ", ".join(req_params + opt_params + ["__server_conf=server_conf"])  # default binds
+            args_build = ", ".join([f"'{k}': {k}" for k in param_names])
+        else:
+            param_sig = "__server_conf=server_conf"
+            args_build = ""
+
+        import json as _json
+        schema_txt = _json.dumps(schema, indent=2) if isinstance(schema, dict) else str(schema)
+        doc = f"""MCP tool '{tname}'. {desc}\nInput schema:\n{schema_txt}\n"""
+        # Escape sequences that could break embedded triple quotes
+        doc_escaped = doc.replace('"""', '\\"""').replace("'''", "\\'\\'\\'")
+
+        # Build function source using triple-single-quoted outer string to avoid conflicts
+        src = f'''
+def {wrapper_name}(self, {param_sig}) -> str:
+    """{doc_escaped}"""
+    args = {{{args_build}}} if {bool(param_names)} else {{}}
+    return self._call_mcp_tool_once(__server_conf, {tname!r}, args)
+'''
+        code_globals = {
+            "server_conf": srv,
+        }
+        code_locals = {}
+        exec(src, code_globals, code_locals)
+        fn = code_locals[wrapper_name]
+        return fn
+
+    def _ensure_mcp_call_tool(self):
+        """Create or update the generic MCP call tool exposed to the LLM."""
+        # Define implementation
+        def _mcp_call(self, tool_name: str, arguments: dict | None = None) -> str:
+            # Allow calls even if discovery failed; server will return an error if the tool is unknown
+            if not self.mcp_server_conf:
+                return "MCP server configuration missing."
+            return self._call_mcp_tool_once(self.mcp_server_conf, tool_name, arguments or {})
+
+        # Bind or update
+        _mcp_call.__name__ = "mcp_call"
+        _mcp_call.__doc__ = (
+            "Call a tool on the configured MCP server.\n"
+            + (f"Available tool_name values: {', '.join(self.mcp_tool_names)}.\n" if self.mcp_tool_names else "")
+            + "arguments: object with fields accepted by the server's tool input schema."
+        )
+        bound = pytypes.MethodType(_mcp_call, self)
+        setattr(self, "mcp_call", bound)
+        # Ensure the tools registry references the fresh bound method
+        self.tools = [t for t in self.tools if getattr(t, "__name__", "") != "mcp_call"]
+        self.tools.append(getattr(self, "mcp_call"))
+
+    def _announce_mcp_tools(self):
+        """Add a system message announcing discovered MCP tools (once per session)."""
+        try:
+            if self.mcp_announce_done:
+                return
+            if not self.mcp_tool_names:
+                return
+            wrappers = ", ".join(self.mcp_wrapper_names) if getattr(self, "mcp_wrapper_names", []) else "(wrappers pending)"
+            tools = ", ".join(self.mcp_tool_names)
+            msg = (
+                "🔌 MCP server connected.\n"
+                f"Discovered tools: {tools}.\n"
+                f"Wrapper functions available: {wrappers}.\n"
+                "Use either the specific wrapper, e.g., mcp_echo(text='hello'), or the generic mcp_call(tool_name='echo', arguments={ 'text': 'hello' })."
+            )
+            self.add_system_message(msg)
+            self.mcp_announce_done = True
+        except Exception as ex:
+            print(f"announce MCP tools failed: {ex}")
+
+    def _run_async(self, coro, timeout: float):
+        """Run an async coroutine to completion even if a loop is already running.
+        Falls back to a dedicated event loop thread if asyncio.run() is not allowed.
+        """
+        try:
+            return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
+        except RuntimeError as ex:
+            # Likely: "asyncio.run() cannot be called from a running event loop"
+            if "asyncio.run()" in str(ex):
+                box = {}
+                def runner():
+                    loop = asyncio.new_event_loop()
+                    try:
+                        asyncio.set_event_loop(loop)
+                        box["value"] = loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
+                    finally:
+                        try:
+                            loop.close()
+                        except Exception:
+                            pass
+                th = threading.Thread(target=runner, daemon=True)
+                th.start(); th.join()
+                return box.get("value")
+            raise
+
+    def _list_mcp_tools(self, srv: dict):
+        """Return list of tools from the MCP server using a short-lived connection."""
+        if not MCP_AVAILABLE:
+            return []
+        try:
+            if (srv.get("type") or ("STDIO" if srv.get("command") else "HTTP")).upper() == "HTTP":
+                # Normalize and derive /mcp from either base or /healthz
+                base = (srv.get("url") or "").strip()
+                norm = base.rstrip("/")
+                if norm.endswith("/healthz"):
+                    api = norm[: -len("/healthz")] + "/mcp"
+                else:
+                    api = norm + "/mcp"
+                async def task():
+                    async with streamablehttp_client(api, terminate_on_close=True) as (read, write, get_session_id):
+                        session = ClientSession(read, write)
+                        await session.initialize()
+                        return await session.list_tools()
+                return self._run_async(task(), timeout=20)
+            else:
+                cmd = srv.get("command")
+                args = srv.get("args") or []
+                async def task():
+                    params = StdioServerParameters(command=cmd, args=list(args))
+                    async with stdio_client(params) as (read, write):
+                        session = ClientSession(read, write)
+                        await session.initialize()
+                        return await session.list_tools()
+                return self._run_async(task(), timeout=25)
+        except Exception as ex:
+            print(f"List MCP tools failed: {ex}")
+            return []
+
+    def _call_mcp_tool_once(self, srv: dict, tool_name: str, arguments: dict) -> str:
+        """Call a single MCP tool once and return a human-readable string.
+        Opens a new short-lived connection each time for safety.
+        """
+        if not MCP_AVAILABLE:
+            return "MCP client is not installed."
+        try:
+            def format_result(res):
+                try:
+                    # Prefer structured/text content
+                    blocks = getattr(res, "content", None)
+                    if blocks:
+                        parts = []
+                        for b in blocks:
+                            # Support dict-like or pydantic object
+                            t = getattr(b, "type", None) or b.get("type") if isinstance(b, dict) else None
+                            if t == "text":
+                                txt = getattr(b, "text", None) or b.get("text")
+                                if txt:
+                                    parts.append(txt)
+                        if parts:
+                            return "\n".join(parts)
+                    # Fallback
+                    return str(res)
+                except Exception:
+                    return str(res)
+
+            if (srv.get("type") or ("STDIO" if srv.get("command") else "HTTP")).upper() == "HTTP":
+                # Normalize URL and derive /mcp endpoint
+                base = (srv.get("url") or "").strip()
+                norm = base.rstrip("/")
+                if norm.endswith("/healthz"):
+                    api = norm[: -len("/healthz")] + "/mcp"
+                else:
+                    api = norm + "/mcp"
+                async def task():
+                    async with streamablehttp_client(api, terminate_on_close=True) as (read, write, get_session_id):
+                        session = ClientSession(read, write)
+                        await session.initialize()
+                        res = await session.call_tool(tool_name, arguments or {})
+                        return format_result(res)
+                try:
+                    return self._run_async(task(), timeout=30)
+                except Exception as ex:
+                    return f"MCP HTTP call failed (endpoint={api}, tool={tool_name}): {repr(ex)}"
+            else:
+                cmd = srv.get("command")
+                args = srv.get("args") or []
+                async def task():
+                    params = StdioServerParameters(command=cmd, args=list(args))
+                    async with stdio_client(params) as (read, write):
+                        session = ClientSession(read, write)
+                        await session.initialize()
+                        res = await session.call_tool(tool_name, arguments or {})
+                        return format_result(res)
+                try:
+                    return self._run_async(task(), timeout=30)
+                except Exception as ex:
+                    return f"MCP STDIO call failed (cmd={cmd} {args}, tool={tool_name}): {repr(ex)}"
+        except Exception as ex:
+            return f"MCP error calling '{tool_name}': {str(ex)}"
         
     def create_temp_directory(self) -> str:
         """Create a temporary directory for file uploads"""
