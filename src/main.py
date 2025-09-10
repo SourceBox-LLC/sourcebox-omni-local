@@ -188,6 +188,13 @@ try:
 except ImportError:
     WHISPER_AVAILABLE = False
 
+# Optional Flet Audio Recorder plugin (moved out of core Flet)
+try:
+    from flet_audio_recorder import AudioRecorder as FletAudioRecorder  # type: ignore
+    FLET_AUDIO_RECORDER_AVAILABLE = True
+except Exception:
+    FLET_AUDIO_RECORDER_AVAILABLE = False
+
 
 class OllamaAgentGUI:
     def __init__(self, page: ft.Page):
@@ -342,11 +349,10 @@ class OllamaAgentGUI:
         )
         self.page.overlay.append(self.file_picker)
         
-        # Audio recorder for voice input
-        self.audio_recorder = ft.AudioRecorder(
-            on_state_changed=self.on_audio_state_changed
-        )
-        self.page.overlay.append(self.audio_recorder)
+        # Audio recorder temporarily disabled to avoid 'Unknown control: audiorecorder' on builds
+        # If you want to enable voice later, install 'flet-audio-recorder' and set a flag to enable.
+        self.audio_recorder = None
+        self.voice_supported = False
         colors = self.settings.get_theme_colors()
         
         # Create header with dynamic styling
@@ -463,18 +469,18 @@ class OllamaAgentGUI:
             height=45
         )
         
-        # Microphone button for audio recording
+        # Microphone button for audio recording (disabled if not supported)
         self.mic_button = ft.Container(
             content=ft.IconButton(
                 icon=ft.Icons.MIC_ROUNDED,
-                on_click=self.toggle_recording,
-                icon_color="#888888",
+                on_click=self.toggle_recording if self.voice_supported else None,
+                icon_color="#888888" if not self.voice_supported else "#dddddd",
                 bgcolor="#2a2a2a",
                 style=ft.ButtonStyle(
                     shape=ft.CircleBorder(),
                     overlay_color="#444444"
                 ),
-                tooltip="Record voice message"
+                tooltip=("Record voice message" if self.voice_supported else "Voice recording unavailable in this build")
             ),
             width=45,
             height=45
@@ -596,6 +602,12 @@ class OllamaAgentGUI:
         
         # Apply the saved theme on startup
         self.apply_theme()
+        # If MCP is enabled, try discovery on startup so wrappers are available immediately
+        try:
+            if MCP_AVAILABLE and self.settings.get("mcp", "enabled"):
+                threading.Thread(target=self.try_attach_mcp_tools, daemon=True).start()
+        except Exception:
+            pass
         
     def create_settings_page(self):
         """Create the settings page UI with dynamic theming"""
@@ -1741,6 +1753,7 @@ class OllamaAgentGUI:
             border_color=colors["border"],
             focused_border_color=colors["accent"],
             label_style=ft.TextStyle(color=colors["text_secondary"]),
+            on_change=self.on_mcp_type_change,
         )
 
         self.mcp_url_field = ft.TextField(
@@ -1754,6 +1767,7 @@ class OllamaAgentGUI:
             label_style=ft.TextStyle(color=colors["text_secondary"]),
             hint_style=ft.TextStyle(color=colors["text_secondary"]),
             on_submit=self.on_add_mcp_server,
+            visible=True,
         )
 
         # STDIO command and args
@@ -1768,6 +1782,7 @@ class OllamaAgentGUI:
             label_style=ft.TextStyle(color=colors["text_secondary"]),
             hint_style=ft.TextStyle(color=colors["text_secondary"]),
             on_submit=self.on_add_mcp_server,
+            visible=False,
         )
 
         self.mcp_args_field = ft.TextField(
@@ -1781,6 +1796,7 @@ class OllamaAgentGUI:
             label_style=ft.TextStyle(color=colors["text_secondary"]),
             hint_style=ft.TextStyle(color=colors["text_secondary"]),
             on_submit=self.on_add_mcp_server,
+            visible=False,
         )
 
         self.mcp_api_key_field = ft.TextField(
@@ -1796,6 +1812,7 @@ class OllamaAgentGUI:
             label_style=ft.TextStyle(color=colors["text_secondary"]),
             hint_style=ft.TextStyle(color=colors["text_secondary"]),
             on_submit=self.on_add_mcp_server,
+            visible=True,
         )
 
         add_button = ft.ElevatedButton(
@@ -1884,6 +1901,11 @@ class OllamaAgentGUI:
         # Keep reference to the status Text so we can update it later
         # The Text is the second control in the last Row above
         self.mcp_status_text = content_items[-1].content.controls[1]
+        # Apply initial visibility based on selected type
+        try:
+            self._apply_mcp_type_visibility()
+        except Exception:
+            pass
 
         return ft.Container(
             content=ft.Column(content_items, spacing=10),
@@ -1893,6 +1915,74 @@ class OllamaAgentGUI:
             border_radius=10,
             border=ft.border.all(1, colors["border"]),
         )
+
+    # ---------------- MCP helpers ----------------
+    def _parse_stdio_args(self, args_str: str) -> list[str]:
+        """Parse the Args textbox into a robust argv list.
+        - Tries shlex.split(posix=False) first.
+        - If a valid .py path with spaces/apostrophes is split, auto-join tokens until os.path.exists(candidate).
+        """
+        import os, shlex
+        if not args_str:
+            return []
+        try:
+            toks = shlex.split(args_str, posix=False)
+        except ValueError:
+            toks = [t for t in args_str.split() if t]
+        # Strip wrapping quotes
+        toks = [t.strip().strip('"').strip("'") for t in toks]
+        # If any token already is an existing .py path, done
+        for t in list(toks):
+            if t.lower().endswith('.py') and os.path.exists(t):
+                return toks
+        # Try to join consecutive tokens into a .py path that exists
+        n = len(toks)
+        for i in range(n):
+            for j in range(i, n):
+                cand = " ".join(toks[i:j+1])
+                if cand.lower().endswith('.py') and os.path.exists(cand):
+                    return toks[:i] + [cand] + toks[j+1:]
+        return toks
+
+    def _repair_stdio_args(self, args_list: list[str]) -> list[str]:
+        """Given a saved argv list, attempt to re-join tokens into a valid .py path if they were split.
+        Leaves args untouched if already valid.
+        """
+        import os
+        args = [a.strip().strip('"').strip("'") for a in (args_list or [])]
+        # Already has valid .py path
+        for a in args:
+            if a.lower().endswith('.py') and os.path.exists(a):
+                return args
+        # Try to join sequences
+        n = len(args)
+        for i in range(n):
+            for j in range(i, n):
+                cand = " ".join(args[i:j+1])
+                if cand.lower().endswith('.py') and os.path.exists(cand):
+                    return args[:i] + [cand] + args[j+1:]
+        return args
+
+    def _apply_mcp_type_visibility(self):
+        """Show only relevant inputs for the selected MCP server type."""
+        stype = (self.mcp_type_field.value or "HTTP").upper()
+        is_http = stype == "HTTP"
+        # HTTP fields
+        self.mcp_url_field.visible = is_http
+        # STDIO fields
+        self.mcp_cmd_field.visible = not is_http
+        self.mcp_args_field.visible = not is_http
+        # API key is generally relevant for HTTP only
+        self.mcp_api_key_field.visible = is_http
+        # Trigger redraw
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
+    def on_mcp_type_change(self, e):
+        """Handle changes to server type dropdown and toggle field visibility."""
+        self._apply_mcp_type_visibility()
 
     def on_mcp_toggle(self, e):
         """Enable/disable MCP and persist setting."""
@@ -1911,6 +2001,8 @@ class OllamaAgentGUI:
 
     def on_add_mcp_server(self, e):
         """Add a new MCP server from input fields (HTTP or STDIO)."""
+        print("[MCP] Add Server clicked")
+        self._set_mcp_status("Adding MCP server...", color="#00d4ff")
         name = (self.mcp_name_field.value or "").strip()
         stype = (self.mcp_type_field.value or "HTTP").strip().upper()
         url = (self.mcp_url_field.value or "").strip()
@@ -1919,29 +2011,27 @@ class OllamaAgentGUI:
         api_key = (self.mcp_api_key_field.value or "").strip()
 
         if not name:
-            self.update_status("Please provide a server name", color="#ffaa00")
+            self._set_mcp_status("Please provide a server name", color="#ffaa00")
             return
 
         server_entry = {"name": name, "type": stype}
 
         if stype == "HTTP":
             if not url:
-                self.update_status("Please provide a server URL", color="#ffaa00")
+                self._set_mcp_status("Please provide a server URL", color="#ffaa00")
                 return
             if not (url.startswith("http://") or url.startswith("https://")):
-                self.update_status("Server URL must start with http:// or https://", color="#ffaa00")
+                self._set_mcp_status("Server URL must start with http:// or https://", color="#ffaa00")
                 return
             server_entry.update({"url": url, "api_key": api_key})
         else:  # STDIO
             if not cmd:
-                self.update_status("Please provide a command for STDIO server", color="#ffaa00")
+                self._set_mcp_status("Please provide a command for STDIO server", color="#ffaa00")
                 return
             # Sanitize command (strip surrounding quotes)
             cmd_clean = cmd.strip().strip('"').strip("'")
-            # Parse args string into list (Windows-friendly)
-            # posix=False avoids backslash-escape issues on Windows paths; then strip any surrounding quotes per token
-            args_list = shlex.split(args_str, posix=False) if args_str else []
-            args_list = [a.strip().strip('"').strip("'") for a in args_list]
+            # Parse/repair args: auto-detect script paths with spaces/apostrophes and join into one token
+            args_list = self._parse_stdio_args(args_str)
             server_entry.update({"command": cmd_clean, "args": args_list, "api_key": api_key})
 
         try:
@@ -1957,7 +2047,7 @@ class OllamaAgentGUI:
                 )
 
             if any(is_duplicate(s) for s in servers):
-                self.update_status("That server is already in your list", color="#ffaa00")
+                self._set_mcp_status("That server is already in your list", color="#ffaa00")
                 return
 
             servers.append(server_entry)
@@ -1972,7 +2062,10 @@ class OllamaAgentGUI:
             self.mcp_cmd_field.value = ""
             self.mcp_args_field.value = ""
             self.mcp_api_key_field.value = ""
-            self.page.update()
+            try:
+                self.page.update()
+            except Exception:
+                pass
 
             # Re-open settings to refresh the list
             self.open_settings(None)
@@ -1981,7 +2074,7 @@ class OllamaAgentGUI:
             threading.Thread(target=self.try_attach_mcp_tools, daemon=True).start()
         except Exception as ex:
             print(f"Error adding MCP server: {ex}")
-            self._set_mcp_status("Failed to add server", color="#ff6666")
+            self._set_mcp_status(f"Failed to add server: {str(ex)[:120]}...", color="#ff6666")
 
     def on_remove_mcp_server(self, server_index: int):
         """Remove an MCP server by index and refresh UI."""
@@ -2067,6 +2160,11 @@ class OllamaAgentGUI:
         # Sanitize potentially quoted values from stored settings
         cmd = (srv.get("command") or "").strip().strip('"').strip("'")
         args = [(str(a).strip().strip('"').strip("'")) for a in (srv.get("args") or [])]
+        # Auto-repair in case the script path was saved split into multiple tokens
+        try:
+            args = self._repair_stdio_args(args)
+        except Exception:
+            pass
         # Show immediate feedback
         self._set_mcp_status("Testing STDIO server...", color="#00d4ff")
         
@@ -2099,8 +2197,20 @@ class OllamaAgentGUI:
                                 cwd = os.path.dirname(tok)
                                 break
                         # Unbuffered IO and verbose logging from the server
-                        env = {"PYTHONUNBUFFERED": "1", "DUMMY_MCP_LOG_LEVEL": "DEBUG"}
-                        params = StdioServerParameters(command=cmd, args=list(args), cwd=cwd, env=env)
+                        # Use base env + overrides to avoid losing required Windows env vars
+                        env = os.environ.copy()
+                        env.update({"PYTHONUNBUFFERED": "1", "DUMMY_MCP_LOG_LEVEL": "DEBUG", "PYTHONIOENCODING": "utf-8"})
+                        # Harden launch: ensure '-u' and '--mode stdio' where appropriate
+                        base = os.path.basename(cmd or "").lower()
+                        final_args = list(args)
+                        if base.startswith("python"):
+                            if not final_args or final_args[0] != "-u":
+                                final_args = ["-u"] + final_args
+                        has_mode = any(a == "--mode" or a.startswith("--mode=") for a in final_args)
+                        has_py = any(str(a).lower().endswith(".py") for a in final_args)
+                        if has_py and not has_mode:
+                            final_args += ["--mode", "stdio"]
+                        params = StdioServerParameters(command=cmd, args=list(final_args), cwd=cwd, env=env)
                         async with stdio_client(params, errlog=err_f) as (read, write):
                             launch_arg = script_path or (args[0] if args else "")
                             self._set_mcp_status(f"Launching: {cmd} {launch_arg}", color="#00d4ff")
@@ -3402,10 +3512,12 @@ class OllamaAgentGUI:
                     # Listing failed or returned empty: still expose generic mcp_call so the model can use it
                     self.mcp_server_conf = srv
                     self._ensure_mcp_call_tool()
+                    detail = getattr(self, "last_mcp_list_error", None)
                     if not self.mcp_announce_done:
-                        self.add_system_message(
-                            "ℹ️ MCP server configured. Tools could not be listed right now; you can still call tools using mcp_call(tool_name, arguments)."
-                        )
+                        msg = "ℹ️ MCP server configured. Tools could not be listed right now; you can still call tools using mcp_call(tool_name, arguments)."
+                        if detail:
+                            msg += f"\nReason: {detail}"
+                        self.add_system_message(msg)
         except Exception as ex:
             print(f"try_attach_mcp_tools error: {ex}")
             # Surface non-fatal problems to chat once so the user understands why MCP didn't appear
@@ -3610,7 +3722,14 @@ def {wrapper_name}(self, {param_sig}) -> str:
             if "asyncio.run()" in str(ex):
                 box = {}
                 def runner():
-                    loop = asyncio.new_event_loop()
+                    # On Windows, use SelectorEventLoop in the background thread so stdio pipes work.
+                    try:
+                        if sys.platform == "win32":
+                            loop = asyncio.SelectorEventLoop()
+                        else:
+                            loop = asyncio.new_event_loop()
+                    except Exception:
+                        loop = asyncio.new_event_loop()
                     try:
                         asyncio.set_event_loop(loop)
                         box["value"] = loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
@@ -3646,15 +3765,69 @@ def {wrapper_name}(self, {param_sig}) -> str:
             else:
                 cmd = srv.get("command")
                 args = srv.get("args") or []
+                # Auto-repair path tokens if necessary
+                try:
+                    args = self._repair_stdio_args(args)
+                except Exception:
+                    pass
+                # Harden launch: add '-u' for python and '--mode stdio' if invoking a script and flag not present
+                try:
+                    base = os.path.basename(cmd or "").lower()
+                except Exception:
+                    base = ""
+                final_args = list(args)
+                try:
+                    if base.startswith("python"):
+                        # Ensure unbuffered
+                        if not final_args or final_args[0] != "-u":
+                            final_args = ["-u"] + final_args
+                    # Ensure stdio mode if a .py script is present and no --mode provided
+                    has_mode = any(a == "--mode" or a.startswith("--mode=") for a in final_args)
+                    has_py = any(str(a).lower().endswith(".py") for a in final_args)
+                    if has_py and not has_mode:
+                        final_args += ["--mode", "stdio"]
+                except Exception:
+                    pass
                 async def task():
-                    params = StdioServerParameters(command=cmd, args=list(args))
-                    async with stdio_client(params) as (read, write):
-                        session = ClientSession(read, write)
-                        await session.initialize()
-                        return await session.list_tools()
+                    import tempfile, os
+                    # Use base env + overrides to avoid losing required Windows vars like SYSTEMROOT
+                    env = os.environ.copy()
+                    env.update({"PYTHONUNBUFFERED": "1", "DUMMY_MCP_LOG_LEVEL": "DEBUG", "PYTHONIOENCODING": "utf-8"})
+                    # Capture server stderr as well for diagnosis
+                    err_f = tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8", delete=False)
+                    try:
+                        # Derive cwd from script path if present
+                        cwd = None
+                        for tok in final_args:
+                            if isinstance(tok, str) and tok.lower().endswith('.py') and os.path.isabs(tok) and os.path.exists(tok):
+                                cwd = os.path.dirname(tok)
+                                break
+                        params = StdioServerParameters(command=cmd, args=list(final_args), env=env, cwd=cwd)
+                        async with stdio_client(params, errlog=err_f) as (read, write):
+                            session = ClientSession(read, write)
+                            await session.initialize()
+                            return await session.list_tools()
+                    finally:
+                        try:
+                            err_f.flush(); err_f.close()
+                        except Exception:
+                            pass
                 return self._run_async(task(), timeout=25)
         except Exception as ex:
-            print(f"List MCP tools failed: {ex}")
+            # Expand nested exception group details if present
+            err = str(ex)
+            try:
+                if hasattr(ex, 'exceptions') and isinstance(getattr(ex, 'exceptions'), (list, tuple)):
+                    eg_details = "".join([f"\n  [{i+1}] {type(s).__name__}: {s}" for i, s in enumerate(ex.exceptions)])
+                    if eg_details:
+                        err = f"{err}{eg_details}"
+            except Exception:
+                pass
+            print(f"List MCP tools failed: {err}")
+            try:
+                self.last_mcp_list_error = err
+            except Exception:
+                pass
             return []
 
     def _call_mcp_tool_once(self, srv: dict, tool_name: str, arguments: dict) -> str:
@@ -4099,6 +4272,10 @@ def {wrapper_name}(self, {param_sig}) -> str:
     
     def toggle_recording(self, e):
         """Toggle audio recording on/off"""
+        if not self.voice_supported or not self.audio_recorder:
+            self.update_status("🎙️ Voice recording is not available in this build", "#ffaa00")
+            self.page.update()
+            return
         if not self.is_recording:
             # Start recording
             self.start_audio_recording()
@@ -4109,6 +4286,8 @@ def {wrapper_name}(self, {param_sig}) -> str:
     def start_audio_recording(self):
         """Start audio recording and save to temp folder"""
         try:
+            if not self.voice_supported or not self.audio_recorder:
+                raise RuntimeError("AudioRecorder not available")
             # Create temp directory if it doesn't exist
             if not self.temp_dir:
                 self.create_temp_directory()
@@ -4128,6 +4307,8 @@ def {wrapper_name}(self, {param_sig}) -> str:
     def stop_audio_recording(self):
         """Stop audio recording"""
         try:
+            if not self.voice_supported or not self.audio_recorder:
+                raise RuntimeError("AudioRecorder not available")
             self.audio_recorder.stop_recording()
         except Exception as e:
             self.update_status(f"❌ Error stopping recording: {str(e)}", "#ff4444")

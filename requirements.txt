@@ -1,0 +1,7 @@
+ollama
+flet
+mcp
+httpx-sse
+replicate
+langchain-community
+langchain
